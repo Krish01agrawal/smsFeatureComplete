@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 # ============================================================================
 
 # 1. MongoDB Connection URL
-MONGODB_URL = "mongodb://localhost:27017/"
+MONGODB_URL = "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 
 # 2. Database Name  
 DATABASE_NAME = "pluto_money"

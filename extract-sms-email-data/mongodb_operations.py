@@ -30,7 +30,7 @@ class MongoDBOperations:
         try:
             # Use environment variable or default
             if connection_string is None:
-                connection_string = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/')
+                connection_string = os.getenv('MONGODB_URI', 'mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
             
             if db_name is None:
                 db_name = os.getenv('MONGODB_DB', 'pluto_money')

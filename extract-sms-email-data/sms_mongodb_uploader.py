@@ -27,7 +27,7 @@ except ImportError:
     sys.exit(1)
 
 # MongoDB Configuration
-MONGODB_URI = "mongodb://localhost:27017/"
+MONGODB_URI = "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DATABASE_NAME = "pluto_money"
 COLLECTION_NAME = "sms_data"
 

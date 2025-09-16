@@ -353,7 +353,7 @@ def main():
             if var == 'API_URL':
                 print(f"   export {var}='your_llm_endpoint'")
             elif var == 'MONGODB_URI':
-                print(f"   export {var}='mongodb://localhost:27017/'")
+                print(f"   export {var}='mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'")
         return 1
     
     try:

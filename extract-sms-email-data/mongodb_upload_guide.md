@@ -54,7 +54,7 @@ python3 sms_mongodb_uploader.py \
 
 ## 📊 Default Configuration
 
-- **Connection**: `mongodb://localhost:27017/`
+- **Connection**: `mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`
 - **Database**: `pluto_money`
 - **Collection**: `sms_data`
 - **Batch Size**: 100 documents per batch
@@ -64,7 +64,7 @@ python3 sms_mongodb_uploader.py \
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--input` | Path to SMS JSON file | Required |
-| `--connection` | MongoDB connection string | `mongodb://localhost:27017/` |
+| `--connection` | MongoDB connection string | `mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0` |
 | `--database` | Database name | `pluto_money` |
 | `--collection` | Collection name | `sms_data` |
 | `--batch-size` | Documents per batch | 100 |
@@ -168,7 +168,7 @@ python3 sms_mongodb_uploader.py \
 ## 📊 Expected Output
 
 ```
-🔌 Connecting to MongoDB: mongodb://localhost:27017/
+🔌 Connecting to MongoDB: mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
 ✅ Connected to database: pluto_money
 📁 Using collection: sms_data
 📁 Loading SMS data from: test_sms.json

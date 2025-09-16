@@ -29,7 +29,7 @@ python3 main.py --input test_realtime.json --output test_results_realtime.json -
 
 
 
-
+cd extract-sms-email-data/
 
 # 1. Upload raw SMS data
 python3 sms_mongodb_uploader.py --input test_sms.json --user-id "test_user_divyam" --create-indexes --stats

@@ -49,7 +49,7 @@ class Config:
     def _load_database_config(self) -> Dict[str, Any]:
         """Load database configuration"""
         return {
-            "uri": os.getenv("MONGODB_URI", "mongodb://localhost:27017/"),
+            "uri": os.getenv("MONGODB_URI", "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"),
             "database": os.getenv("MONGODB_DB", "pluto_money"),
             "connection_pool": {
                 "max_pool_size": int(os.getenv("MONGODB_MAX_POOL_SIZE", "50")),
