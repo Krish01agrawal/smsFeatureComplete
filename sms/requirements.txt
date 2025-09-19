@@ -1,0 +1,21 @@
+# Core libraries used in SMS transaction analysis
+pandas>=1.5.0
+streamlit>=1.28.0
+plotly>=5.15.0
+mlxtend>=0.22.0
+
+# MongoDB connectivity
+pymongo>=4.5.0
+python-dotenv>=1.0.0
+
+# Enhanced features
+rapidfuzz>=3.0.0
+
+# Financial Chat API dependencies
+fastapi>=0.104.0
+uvicorn>=0.24.0
+requests>=2.31.0
+pydantic>=2.0.0
+
+# AI Model Management
+python-dotenv>=1.0.0 

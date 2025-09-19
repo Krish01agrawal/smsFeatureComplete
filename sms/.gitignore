@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environment variables
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Test files and data
+test/
+*.json
+!resources/*.json
+
+# Learning data files (user-specific cached patterns)
+learning_data*.json
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Documentation (keep only main README)
+*_SUMMARY.md
+*_DELIVERABLE.md
+*_ANALYSIS.md
+comprehensive_*.md
+README_*.md
+
+# Large data files
+synthetic_transactions.json
+balanced_realistic_transactions.json
+realistic_synthetic_transactions.json
+sms_data_*.json

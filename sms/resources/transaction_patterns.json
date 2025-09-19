@@ -1,0 +1,135 @@
+{
+  "salary": [
+    "salary",
+    "salary credit",
+    "payroll",
+    "neft salary",
+    "cms salary",
+    "salary from",
+    "salary deposit",
+    "payroll credit",
+    "salary cr",
+    "company salary",
+    "monthly salary"
+  ],
+  "upi": [
+    "upi",
+    "@upi",
+    "@ok",
+    "@okicici",
+    "@ybl",
+    "@okhdfcbank",
+    "@okaxis",
+    "@oksbi",
+    "gpay",
+    "google pay",
+    "phonepe",
+    "paytm upi",
+    "upi transfer",
+    "upi payment"
+  ],
+  "credit_card_payment": [
+    "credit card payment",
+    "cc payment",
+    "bill payment for credit card",
+    "credit card bill",
+    "cc bill payment",
+    "card bill payment"
+  ],
+  "credit_card_spend": [
+    "credit card txn",
+    "card swipe",
+    "cc purchase",
+    "credit card purchase",
+    "card transaction",
+    "pos credit"
+  ],
+  "debit_card": [
+    "debit card",
+    "atm withdrawal",
+    "cash withdrawal",
+    "pos debit",
+    "card debit",
+    "atm transaction"
+  ],
+  "income": [
+    "credited",
+    "credit",
+    "cr",
+    "received",
+    "refund",
+    "cashback",
+    "bonus",
+    "incentive",
+    "commission"
+  ],
+  "expense": [
+    "debited",
+    "debit",
+    "dr",
+    "payment",
+    "purchase",
+    "spent",
+    "charged",
+    "deducted"
+  ],
+  "rent": [
+    "rent",
+    "house rent",
+    "apartment rent",
+    "accommodation",
+    "pg rent",
+    "property rent"
+  ],
+  "utilities": [
+    "electricity",
+    "power bill",
+    "bseb",
+    "electric bill",
+    "water bill",
+    "municipal",
+    "corporation",
+    "gas bill",
+    "lpg",
+    "cylinder"
+  ],
+  "telecom": [
+    "airtel",
+    "jio",
+    "vodafone",
+    "bsnl",
+    "mobile bill",
+    "phone bill",
+    "internet bill",
+    "broadband"
+  ],
+  "entertainment": [
+    "netflix",
+    "prime",
+    "hotstar",
+    "disney",
+    "streaming",
+    "cinema",
+    "movie",
+    "spotify",
+    "youtube premium"
+  ],
+  "insurance": [
+    "insurance",
+    "policy",
+    "lic",
+    "premium",
+    "life insurance",
+    "health insurance",
+    "vehicle insurance"
+  ],
+  "loan": [
+    "loan emi",
+    "emi payment",
+    "loan payment",
+    "mortgage",
+    "personal loan",
+    "home loan",
+    "car loan"
+  ]
+} 

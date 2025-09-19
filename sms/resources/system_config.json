@@ -1,0 +1,91 @@
+{
+  "transaction_classification": {
+    "salary_confidence_threshold": 15.0,
+    "large_transaction_amount": 20000,
+    "similarity_threshold": 0.6,
+    "recurring_merchant_ratio": 0.5,
+    "pattern_matching": {
+      "exact_match_weight": 1.0,
+      "partial_match_weight": 0.7,
+      "fuzzy_match_weight": 0.5
+    }
+  },
+  "time_configurations": {
+    "weekend_days": [
+      5,
+      6
+    ],
+    "time_bins": [
+      0,
+      6,
+      12,
+      18,
+      24
+    ],
+    "day_categories": {
+      "weekday": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "weekend": [
+        5,
+        6
+      ]
+    },
+    "monthly_analysis_periods": [
+      3,
+      6,
+      12,
+      24
+    ]
+  },
+  "performance_limits": {
+    "max_transactions_per_user": 5000,
+    "batch_size": 1000,
+    "cache_timeout": 300,
+    "max_concurrent_users": 100,
+    "memory_limit_mb": 2048
+  },
+  "anomaly_detection": {
+    "pattern_break_threshold": 1.5,
+    "spending_spike_threshold": 2.0,
+    "panic_spending_threshold": 5,
+    "relationship_change_threshold": 0.3
+  },
+  "merchant_categorization": {
+    "fuzzy_threshold": 85,
+    "similarity_threshold": 0.7,
+    "category_confidence_threshold": 0.6,
+    "auto_learning_enabled": true
+  },
+  "database": {
+    "connection_pool_size": 10,
+    "max_connection_lifetime": 3600,
+    "index_creation_enabled": true,
+    "batch_write_size": 1000
+  },
+  "caching": {
+    "enabled": true,
+    "redis_host": "localhost",
+    "redis_port": 6379,
+    "redis_db": 0,
+    "default_ttl": 3600
+  },
+  "ml_models": {
+    "classification_model_path": "models/transaction_classifier.pkl",
+    "merchant_categorizer_path": "models/merchant_categorizer.pkl",
+    "anomaly_detector_path": "models/anomaly_detector.pkl",
+    "auto_retrain_enabled": true,
+    "retrain_threshold": 1000
+  },
+  "scalability": {
+    "user_batch_size": 100,
+    "transaction_batch_size": 1000,
+    "parallel_processing": true,
+    "max_workers": 4,
+    "load_balancing_enabled": true
+  }
+}
