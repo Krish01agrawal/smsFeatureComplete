@@ -1446,22 +1446,41 @@ async def process_all_batches(input_path: str, output_path: str, model: str, mod
                             if stored_count != len(batch_results_collected):
                                 print(f"  ⚠️  WARNING: Expected to store {len(batch_results_collected)}, but stored {stored_count}")
                             
-                            # Mark SMS as processed IMMEDIATELY after storage
+                            # 🚀 FIXED: Mark ALL processed SMS as isprocessed=true (success AND failures)
                             success_count = 0
+                            
+                            # Mark successful SMS as processed in sms_fin_rawdata
                             for sms in batch_results_collected:
                                 source_id = sms.get('unique_id')  # 🚀 FIXED: Use unique_id
                                 if source_id:
-                                    print(f"  🔍 DEBUG: Marking SMS {source_id} as processed...")
+                                    print(f"  🔍 DEBUG: Marking successful SMS {source_id} as processed...")
                                     success = mongo_ops.mark_financial_sms_as_processed(source_id, "success")
                                     if success:
                                         success_count += 1
-                                        print(f"  ✅ Marked SMS {source_id} as processed IMMEDIATELY")
+                                        print(f"  ✅ Marked SMS {source_id} as processed (success)")
                                     else:
                                         print(f"  ❌ Failed to mark SMS {source_id} as processed")
                                 else:
                                     print(f"  ⚠️  Result missing unique_id: {sms.get('unique_id', 'NO_ID')}")
                             
-                            print(f"  ✅ IMMEDIATE Status Update: {success_count}/{len(batch_results_collected)} SMS marked as processed")
+                            # 🚀 NEW: Mark failed/no-transaction SMS as processed in sms_fin_rawdata too!
+                            failed_count = 0
+                            for sms in batch_failures_collected:
+                                source_id = sms.get('unique_id')  # 🚀 FIXED: Use unique_id
+                                if source_id:
+                                    print(f"  🔍 DEBUG: Marking failed SMS {source_id} as processed...")
+                                    success = mongo_ops.mark_financial_sms_as_processed(source_id, "processed_no_transaction")
+                                    if success:
+                                        failed_count += 1
+                                        print(f"  ✅ Marked SMS {source_id} as processed (no transaction)")
+                                    else:
+                                        print(f"  ❌ Failed to mark SMS {source_id} as processed")
+                                else:
+                                    print(f"  ⚠️  Failed SMS missing unique_id: {sms.get('unique_id', 'NO_ID')}")
+                            
+                            total_marked = success_count + failed_count
+                            total_processed = len(batch_results_collected) + len(batch_failures_collected)
+                            print(f"  ✅ CORRECT LOGIC: {total_marked}/{total_processed} SMS marked as processed (success: {success_count}, no-transaction: {failed_count})")
                             
                             # Update user stats with financial transactions count
                             if user_id and len(batch_results_collected) > 0:

@@ -390,12 +390,11 @@ class MongoDBOperations:
                 "updated_at": datetime.now()
             }
             
-            # 🚀 COMPREHENSIVE SEARCH: Try all possible ID patterns
+            # 🚀 FIXED: PRIORITIZE EXACT FULL unique_id MATCH FIRST
             search_queries = [
-                {"sms_id": simple_sms_id},  # NEW: Simplified ID
-                {"unique_id": simple_sms_id},  # OLD: Short format
-                {"unique_id": sms_id},  # OLD: Long format
-                # 🚀 FIXED: No _source_id needed - using unique_id only
+                {"unique_id": sms_id},  # PRIORITY 1: Full unique_id (exact match)
+                {"sms_id": simple_sms_id},  # PRIORITY 2: Simplified ID (fallback)
+                {"unique_id": simple_sms_id},  # PRIORITY 3: Short format (legacy)
             ]
             
             # Try each search query
