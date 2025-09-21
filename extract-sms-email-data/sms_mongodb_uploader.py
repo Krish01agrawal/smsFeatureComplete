@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import sys
 import os
+import hashlib
 
 try:
     from pymongo import MongoClient
@@ -94,9 +95,10 @@ class SMSMongoUploader:
     
     def validate_sms_data(self, sms_data: List[Dict[str, Any]], user_id: str = None, 
                          user_name: str = None, user_email: str = None, user_phone: str = None) -> List[Dict[str, Any]]:
-        """Validate SMS data and ensure user exists with proper user management"""
+        """Validate SMS data with BULLETPROOF duplicate prevention and user management"""
         validated_data = []
         errors = []
+        duplicate_count = 0
         
         # Handle user management
         if user_id:
@@ -152,6 +154,44 @@ class SMSMongoUploader:
         
         print(f"   🆔 Final user_id: {user_id}")
         
+        # 🚀 GET USER PHONE NUMBER for all collections
+        user_phone_number = None
+        if self.user_manager and user_id:
+            user_doc = self.user_manager.get_user(user_id)
+            if user_doc and user_doc.get('phone'):
+                user_phone_number = user_doc['phone']
+                print(f"   📱 User phone: {user_phone_number}")
+            else:
+                # Fallback: use provided phone or extract from user_phone parameter
+                user_phone_number = user_phone
+                print(f"   📱 Using provided phone: {user_phone_number}")
+        
+        # 🚀 BULLETPROOF DUPLICATE PREVENTION: Pre-load existing SMS for this user
+        print(f"🔍 Checking for existing SMS duplicates for user: {user_id}")
+        existing_sms_hashes = set()
+        try:
+            # Get all existing SMS for this user from database
+            existing_cursor = self.collection.find(
+                {"user_id": user_id}, 
+                {"content_hash": 1, "sender": 1, "body": 1, "date": 1}
+            )
+            
+            for existing_sms in existing_cursor:
+                # Try to get existing hash, or calculate it from content
+                if "content_hash" in existing_sms:
+                    existing_sms_hashes.add(existing_sms["content_hash"])
+                else:
+                    # Calculate hash from existing SMS content for backward compatibility
+                    content_for_hash = f"{existing_sms.get('sender', '')}{existing_sms.get('body', '')}{existing_sms.get('date', '')}"
+                    content_hash = hashlib.sha256(content_for_hash.encode('utf-8')).hexdigest()[:16]
+                    existing_sms_hashes.add(content_hash)
+            
+            print(f"   📊 Found {len(existing_sms_hashes)} existing SMS hashes for duplicate checking")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not load existing SMS for duplicate checking: {e}")
+            existing_sms_hashes = set()
+        
         for i, sms in enumerate(sms_data):
             try:
                 # Create normalized document
@@ -161,6 +201,7 @@ class SMSMongoUploader:
                     "date": sms.get("date", ""),
                     "type": sms.get("type", "received"),
                     "user_id": user_id,  # Assign user_id to all SMS
+                    "phone": user_phone_number,  # 🚀 NEW: Add phone field for easy filtering
                     "email_id": None,    # SMS don't have email_id
                     "uploaded_at": datetime.utcnow(),
                     "source_index": i + 1
@@ -175,8 +216,22 @@ class SMSMongoUploader:
                     errors.append(f"SMS {i+1}: Missing both sender and body")
                     continue
                 
+                # 🚀 BULLETPROOF DUPLICATE PREVENTION: Content-based hash
+                content_for_hash = f"{doc['sender']}{doc['body']}{doc['date']}"
+                content_hash = hashlib.sha256(content_for_hash.encode('utf-8')).hexdigest()[:16]
+                doc["content_hash"] = content_hash
+                
+                # Check if this SMS already exists for this user
+                if content_hash in existing_sms_hashes:
+                    duplicate_count += 1
+                    print(f"   🔄 Duplicate SMS detected (hash: {content_hash}): {doc['sender'][:20]}... | {doc['body'][:30]}...")
+                    continue  # Skip this SMS
+                
+                # Add to existing hashes to prevent duplicates within this batch
+                existing_sms_hashes.add(content_hash)
+                
                 # 🚀 FIXED: Use unique_id as the ONLY identifier (compatible with old data)
-                doc["unique_id"] = f"{user_id}_sms_{i+1:06d}"
+                doc["unique_id"] = f"{user_id}_sms_{len(validated_data)+1:06d}"  # Use validated_data length for correct numbering
                 
                 # Add processing status field (default: not processed)
                 doc["is_processed"] = False
@@ -193,9 +248,13 @@ class SMSMongoUploader:
             if len(errors) > 5:
                 print(f"   ... and {len(errors) - 5} more errors")
         
-        print(f"✅ Validated {len(validated_data)} SMS documents for user: {user_id}")
+        if duplicate_count > 0:
+            print(f"🔄 DUPLICATE PREVENTION: Filtered out {duplicate_count} duplicate SMS")
         
-        # Update user SMS statistics
+        print(f"✅ Validated {len(validated_data)} NEW SMS documents for user: {user_id}")
+        print(f"   📊 Summary: {len(sms_data)} input → {len(validated_data)} new + {duplicate_count} duplicates + {len(errors)} errors")
+        
+        # Update user SMS statistics (only for NEW SMS)
         if self.user_manager and len(validated_data) > 0:
             self.user_manager.update_user_sms_stats(
                 user_id=user_id,
@@ -211,7 +270,9 @@ class SMSMongoUploader:
             # Create indexes
             indexes = [
                 ("user_id", 1),      # For user-based queries
+                ("phone", 1),        # 🚀 NEW: For phone-based queries and filtering
                 ("unique_id", 1),    # 🚀 FIXED: For duplicate detection using unique_id (compatible with old data)
+                ("content_hash", 1), # 🚀 NEW: For bulletproof duplicate prevention
                 ("sender", 1),       # For sender-based queries
                 ("date", -1),        # For date-based queries (descending)
                 ("uploaded_at", -1), # For upload tracking
@@ -236,6 +297,18 @@ class SMSMongoUploader:
                 print("🔒 Created unique index for duplicate prevention on unique_id")
             except Exception as e:
                 print(f"⚠️  Unique index warning: {e}")
+            
+            # 🚀 NEW: Create compound unique index for bulletproof content-based duplicate prevention
+            try:
+                self.collection.create_index(
+                    [("user_id", 1), ("content_hash", 1)], 
+                    unique=True,
+                    background=True,
+                    name="unique_content_per_user_idx"
+                )
+                print("🔒 Created bulletproof duplicate prevention index on (user_id + content_hash)")
+            except Exception as e:
+                print(f"⚠️  Content hash index warning: {e}")
                 
         except Exception as e:
             print(f"❌ Error creating indexes: {e}")
@@ -359,7 +432,7 @@ def main():
     parser.add_argument("--user-id", help="Existing user ID to assign to all SMS")
     parser.add_argument("--user-name", help="User name (for new user creation)")
     parser.add_argument("--user-email", help="User email (for new user creation)")
-    parser.add_argument("--user-phone", help="User phone (for new user creation)")
+    parser.add_argument("--user-phone", help="User phone (for new user creation or finding existing user)")
     parser.add_argument("--connection", default=MONGODB_URI, help="MongoDB connection string")
     parser.add_argument("--database", default=DATABASE_NAME, help="Database name")
     parser.add_argument("--collection", default=COLLECTION_NAME, help="Collection name")

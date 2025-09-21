@@ -509,6 +509,7 @@ def main():
     
     parser = argparse.ArgumentParser(description="User Manager Operations")
     parser.add_argument("--create", action="store_true", help="Create a test user")
+    parser.add_argument("--find-phone", help="Find existing user by phone number")
     parser.add_argument("--name", help="User name")
     parser.add_argument("--email", help="User email")
     parser.add_argument("--phone", help="User phone")
@@ -525,7 +526,37 @@ def main():
         return 1
     
     try:
-        if args.create:
+        if args.find_phone:
+            print(f"🔍 Finding user by phone: {args.find_phone}")
+            user = user_manager.find_user_by_info(phone=args.find_phone)
+            
+            if user:
+                print(f"✅ User found!")
+                print(f"   User ID: {user['user_id']}")
+                print(f"   Name: {user['name']}")
+                print(f"   Email: {user['email']}")
+                print(f"   Phone: {user['phone']}")
+            else:
+                print(f"❌ No user found with phone: {args.find_phone}")
+                
+                # If name is provided, create new user
+                if args.name:
+                    print(f"🔄 Creating new user with phone: {args.find_phone}")
+                    result = user_manager.create_user(
+                        name=args.name,
+                        email=args.email,
+                        phone=args.find_phone
+                    )
+                    
+                    if result["success"]:
+                        print(f"✅ User created successfully!")
+                        print(f"   User ID: {result['user_id']}")
+                    else:
+                        print(f"❌ Failed to create user:")
+                        for error in result["errors"]:
+                            print(f"   - {error}")
+        
+        elif args.create:
             print("👤 Creating user...")
             result = user_manager.create_user(
                 name=args.name,

@@ -103,6 +103,7 @@ class MongoDBOperations:
             self._create_index_safe(self.fin_raw_collection, [("unique_id", 1)])
             self._create_index_safe(self.fin_raw_collection, [("isprocessed", 1)])
             self._create_index_safe(self.fin_raw_collection, [("user_id", 1)])
+            self._create_index_safe(self.fin_raw_collection, [("phone", 1)])  # 🚀 NEW: Phone-based filtering
             self._create_index_safe(self.fin_raw_collection, [("processing_timestamp", -1)])
             self._create_index_safe(self.fin_raw_collection, [("processing_status", 1)])
             
@@ -124,6 +125,7 @@ class MongoDBOperations:
             # Financial transactions collection indexes  
             self._create_index_safe(self.transactions_collection, [("unique_id", 1)], unique=True)
             self._create_index_safe(self.transactions_collection, [("user_id", 1)])
+            self._create_index_safe(self.transactions_collection, [("phone", 1)])  # 🚀 NEW: Phone-based filtering
             self._create_index_safe(self.transactions_collection, [("transaction_date", -1)])
             self._create_index_safe(self.transactions_collection, [("amount", 1)])
             self._create_index_safe(self.transactions_collection, [("transaction_type", 1)])

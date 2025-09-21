@@ -189,6 +189,19 @@ Examples:
         action="store_true", 
         help="Show what would be done without making changes"
     )
+    parser.add_argument(
+        "--force", 
+        action="store_true", 
+        help="Force replacement without confirmation prompt (for automation)"
+    )
+    parser.add_argument(
+        "--user-id", 
+        help="Process only specific user_id (optional - if not provided, processes all users)"
+    )
+    parser.add_argument(
+        "--phone", 
+        help="Process only specific phone number (optional - if not provided, processes all users)"
+    )
     
     args = parser.parse_args()
 
@@ -256,26 +269,94 @@ Examples:
             print("✅ Dry run completed. Use without --dry-run to perform actual conversion.")
             return
 
+        # 🚀 SMART USER-AWARE DUPLICATE PREVENTION: Only check for source users' data
+        print(f"\n🔍 Checking destination collection for existing data...")
+        dest_exists = args.dest in db.list_collection_names()
+        total_existing_count = 0
+        source_users_count = 0
+        
+        if dest_exists:
+            total_existing_count = dst_collection.estimated_document_count()
+            print(f"   📊 Total documents in destination: {total_existing_count:,}")
+            
+            # 🚀 CRITICAL FIX: Check for source users' data only
+            # Get unique user_ids from source collection
+            source_user_ids = src_collection.distinct("user_id")
+            print(f"   🔍 Found {len(source_user_ids)} unique user_ids in source collection")
+            
+            if source_user_ids:
+                # Check if ANY of the source users already have data in destination
+                source_users_count = dst_collection.count_documents({"user_id": {"$in": source_user_ids}})
+                print(f"   📊 Documents for source users in destination: {source_users_count:,}")
+                
+                if source_users_count > 0:
+                    print(f"⚠️  Found {source_users_count:,} existing documents for source users")
+                    print(f"   These will be UPDATED/REPLACED with new date format")
+                    print(f"   🛡️  Other users' data ({total_existing_count - source_users_count:,} docs) will be PRESERVED")
+                    
+                    if args.force:
+                        print(f"🚀 --force flag provided: Automatically proceeding")
+                    else:
+                        confirmation = input(f"\nType 'UPDATE' to proceed with updating {source_users_count:,} documents: ")
+                        if confirmation != 'UPDATE':
+                            print("❌ Operation cancelled. No changes made.")
+                            return
+                    
+                    print(f"✅ Will update {source_users_count:,} documents for source users")
+                else:
+                    print(f"✅ No existing data for source users - will add {total_docs:,} new documents")
+                    print(f"   🛡️  Existing data from other users ({total_existing_count:,} docs) will be PRESERVED")
+            else:
+                print(f"⚠️  No user_id found in source documents - proceeding with caution")
+        else:
+            print(f"   ✅ Destination collection '{args.dest}' does not exist - will create new")
+
         # Build conversion pipeline
         print(f"\n🔄 Building conversion pipeline...")
         conversion_expr = build_conversion_expression(args.timezone)
         
+        # 🚀 CRITICAL FIX: Use $merge to preserve other users' data
+        # Build match criteria
+        match_criteria = {
+            "user_id": {"$exists": True, "$ne": None},  # Filter out documents with bad user_id
+            "unique_id": {"$exists": True, "$ne": None, "$ne": ""}  # Filter out documents with bad unique_id
+        }
+        
+        # 🚀 NEW: Add user-specific filtering if requested
+        if args.user_id:
+            match_criteria["user_id"] = args.user_id
+            print(f"   🎯 Filtering for specific user_id: {args.user_id}")
+        elif args.phone:
+            match_criteria["phone"] = args.phone
+            print(f"   🎯 Filtering for specific phone: {args.phone}")
+        else:
+            print(f"   🌐 Processing ALL users in source collection")
+        
         pipeline = [
+            {
+                "$match": match_criteria
+            },
             {
                 "$addFields": {
                     "transaction_date": conversion_expr
                 }
             },
             {
-                "$out": args.dest  # Atomic collection creation/replacement
+                "$merge": {
+                    "into": args.dest,
+                    "on": ["user_id", "unique_id"],  # 🚀 CRITICAL: Match on user_id + unique_id
+                    "whenMatched": "replace",  # Replace only documents with same user_id + unique_id
+                    "whenNotMatched": "insert"  # Insert if no match found
+                }
             }
         ]
 
         print(f"⚙️  Pipeline stages: {len(pipeline)}")
         
         # Execute conversion
-        print(f"\n🚀 Converting dates and creating collection: {args.db}.{args.dest}")
-        print("⏳ This may take a while for large collections...")
+        print(f"\n🚀 Converting dates and merging into collection: {args.db}.{args.dest}")
+        print("⏳ Using $merge to preserve existing data from other users...")
+        print("   📊 Only documents from source collection will be processed")
         
         start_time = datetime.now()
         
@@ -328,8 +409,9 @@ Examples:
         print(f"\n🎉 CONVERSION COMPLETE!")
         print("=" * 50)
         print(f"✅ Source collection '{args.source}' preserved unchanged")
-        print(f"✅ New collection '{args.dest}' created with BSON dates")
+        print(f"✅ Collection '{args.dest}' updated with BSON dates using $merge")
         print(f"✅ {dst_dates:,} transaction_date fields converted to BSON Date")
+        print(f"✅ Existing data from other users preserved")
         print(f"✅ All other fields preserved exactly")
         print(f"✅ Indexes copied successfully")
         print("=" * 50)
