@@ -8,6 +8,12 @@ String Date (financial_transactions)  -->   BSON date (user_financial_transactio
 
 
 
+1. test_sms.json → sms_mongodb_uploader.py → sms_data (MongoDB)
+2. sms_data → mongodb_pipeline.py → sms_financial_filter.py → financial SMS
+3. financial SMS → extract_financial_array.py → array format
+4. array → main.py (rule-based fallback) → financial_transactions
+5. financial_transactions → convert_transaction_dates.py → user_financial_transactions
+
 
 <!-- 
 
@@ -31,14 +37,64 @@ python3 main.py --input test_realtime.json --output test_results_realtime.json -
 
 cd extract-sms-email-data/
 
-# 1. Upload raw SMS data
-python3 sms_mongodb_uploader.py --input test_sms.json --user-id "test_user_divyam" --create-indexes --stats
 
-# 2. Run complete pipeline (THE MOST IMPORTANT COMMAND)
-python3 mongodb_pipeline.py --user-id "test_user_divyam" --batch-size 2 --model "qwen3:8b"
+
+
+# 🎯 ENTERPRISE USER MANAGEMENT SYSTEM
+# =====================================
+
+# Option 1: Create user manually first (recommended for production)
+python3 user_manager.py --create --name "Divyam Verma" --email "divyam@example.com" --phone "+91-9876543210"
+# Output: User ID: usr_a1b2c3d4_20250921_102030_f47ac10b
+
+# Option 2: Auto-create user during SMS upload (quick start)
+python3 sms_mongodb_uploader.py --input test_sms.json --user-name "Divyam Verma" --user-email "divyam@example.com" --user-phone "+91-9876543210" --create-indexes --user-stats
+
+# Option 3: Use existing user ID
+python3 sms_mongodb_uploader.py --input test_sms.json --user-id "usr_0f55bfcd_20250921_173053_85d85715" --create-indexes --stats
+
+
+
+
+
+
+# 🚀 COMPLETE SMS PROCESSING PIPELINE
+# ===================================
+
+# 1. Upload raw SMS data with enterprise user management
+python3 sms_mongodb_uploader.py --input test_sms.json --user-name "Test User" --user-email "test@example.com" --create-indexes --user-stats
+
+# 2. Run complete pipeline with user ID (THE MOST IMPORTANT COMMAND)
+# Use the user_id from step 1 output
+python3 mongodb_pipeline.py --user-id "usr_GENERATED_ID_FROM_STEP_1" --batch-size 2 --model "qwen3:8b"
 
 # 3. (Optional) Convert dates to BSON format
 python3 convert_transaction_dates.py --db pluto_money --source financial_transactions --dest user_financial_transactions
 
-# 4. Verify results
-python3 -c "from mongodb_operations import MongoDBOperations; mongo = MongoDBOperations(); print('Final transactions:', mongo.transactions_collection.count_documents({'user_id': 'test_user_divyam'})); mongo.close_connection()"
+# 4. Verify results and check user statistics
+python3 user_manager.py --stats
+python3 user_manager.py --list
+
+
+
+
+
+
+
+# 📊 MONITORING & ANALYTICS
+# =========================
+
+# Check system-wide statistics
+python3 user_manager.py --stats
+
+# List all users
+python3 user_manager.py --list
+
+
+
+
+# Upload more SMS for existing user
+python3 sms_mongodb_uploader.py --input more_sms.json --user-id "usr_EXISTING_USER_ID" --user-stats
+
+
+

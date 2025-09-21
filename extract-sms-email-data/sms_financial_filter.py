@@ -211,7 +211,12 @@ class SMSFinancialFilter:
         
         for i, sms in enumerate(sms_list):
             if self.is_financial_sms(sms):
-                sms['unique_id'] = f"sms_{i+1:06d}"  # Add unique ID (e.g., sms_000001)
+                # 🚀 FIXED: PRESERVE original unique_id from sms_data - DO NOT overwrite!
+                # The unique_id must remain consistent across ALL collections
+                if 'unique_id' not in sms:
+                    logger.warning(f"⚠️  SMS missing unique_id - this should not happen!")
+                    sms['unique_id'] = f"fallback_sms_{i+1:06d}"
+                
                 sms['isprocessed'] = False  # Mark as unprocessed
                 financial_sms.append(sms)
             else:

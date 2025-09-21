@@ -26,13 +26,20 @@ except ImportError:
     print("❌ PyMongo not installed. Install with: pip install pymongo")
     sys.exit(1)
 
+# Import user management system
+try:
+    from user_manager import UserManager
+except ImportError:
+    print("❌ UserManager not found. Make sure user_manager.py is in the same directory")
+    sys.exit(1)
+
 # MongoDB Configuration
 MONGODB_URI = "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 DATABASE_NAME = "pluto_money"
 COLLECTION_NAME = "sms_data"
 
 class SMSMongoUploader:
-    """SMS MongoDB Uploader with batch processing and error handling"""
+    """SMS MongoDB Uploader with enterprise user management"""
     
     def __init__(self, connection_string: str = MONGODB_URI, 
                  db_name: str = DATABASE_NAME, collection_name: str = COLLECTION_NAME):
@@ -42,18 +49,28 @@ class SMSMongoUploader:
         self.client = None
         self.db = None
         self.collection = None
+        self.user_manager = None
         
     def connect(self) -> bool:
-        """Connect to MongoDB"""
+        """Connect to MongoDB and initialize user management"""
         try:
             print(f"🔌 Connecting to MongoDB: {self.connection_string}")
-            self.client = MongoClient(self.connection_string, serverSelectionTimeoutMS=5000)
+            self.client = MongoClient(
+                self.connection_string, 
+                serverSelectionTimeoutMS=5000,
+                tlsAllowInvalidCertificates=True  # Fix SSL certificate issues
+            )
             
             # Test connection
             self.client.admin.command('ping')
             
             self.db = self.client[self.db_name]
             self.collection = self.db[self.collection_name]
+            
+            # Initialize user manager
+            self.user_manager = UserManager(self.connection_string, self.db_name)
+            if not self.user_manager.connect():
+                print("⚠️  User manager connection failed, but continuing...")
             
             print(f"✅ Connected to database: {self.db_name}")
             print(f"📁 Using collection: {self.collection_name}")
@@ -69,20 +86,71 @@ class SMSMongoUploader:
     
     def disconnect(self):
         """Close MongoDB connection"""
+        if self.user_manager:
+            self.user_manager.disconnect()
         if self.client:
             self.client.close()
             print("🔌 Disconnected from MongoDB")
     
-    def validate_sms_data(self, sms_data: List[Dict[str, Any]], user_id: str = None) -> List[Dict[str, Any]]:
-        """Validate and normalize SMS data with user_id assignment"""
+    def validate_sms_data(self, sms_data: List[Dict[str, Any]], user_id: str = None, 
+                         user_name: str = None, user_email: str = None, user_phone: str = None) -> List[Dict[str, Any]]:
+        """Validate SMS data and ensure user exists with proper user management"""
         validated_data = []
         errors = []
         
-        # Generate user_id from filename if not provided
-        if not user_id:
-            user_id = f"user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Handle user management
+        if user_id:
+            # Validate existing user_id
+            if self.user_manager and not self.user_manager.user_exists(user_id):
+                print(f"⚠️  User ID {user_id} not found in users collection")
+                print(f"   Creating user profile...")
+                
+                # Create user with provided info
+                user_result = self.user_manager.create_user(
+                    name=user_name or f"User {user_id}",
+                    email=user_email,
+                    phone=user_phone,
+                    metadata={"source": "sms_upload", "user_id": user_id}
+                )
+                
+                if not user_result["success"]:
+                    print(f"❌ Failed to create user profile:")
+                    for error in user_result["errors"]:
+                        print(f"   - {error}")
+                    # Continue with provided user_id anyway
+            else:
+                print(f"✅ User {user_id} found in users collection")
+        else:
+            # Create new user using user management system
+            if self.user_manager:
+                print(f"👤 Creating new user...")
+                user_result = self.user_manager.get_or_create_user(
+                    name=user_name,
+                    email=user_email,
+                    phone=user_phone,
+                    metadata={"source": "sms_upload"}
+                )
+                
+                if user_result["success"]:
+                    user_id = user_result["user_id"]
+                    created_or_found = "Created" if user_result.get("created", False) else "Found existing"
+                    print(f"   ✅ {created_or_found} user: {user_id}")
+                    if user_result["warnings"]:
+                        for warning in user_result["warnings"]:
+                            print(f"   ⚠️  {warning}")
+                else:
+                    print(f"❌ Failed to create user:")
+                    for error in user_result["errors"]:
+                        print(f"   - {error}")
+                    # Fallback to timestamp-based ID
+                    user_id = f"fallback_user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    print(f"   🔄 Using fallback user_id: {user_id}")
+            else:
+                # Fallback when user manager is not available
+                user_id = f"legacy_user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                print(f"   ⚠️  User manager not available, using fallback: {user_id}")
         
-        print(f"   🆔 Assigning user_id: {user_id}")
+        print(f"   🆔 Final user_id: {user_id}")
         
         for i, sms in enumerate(sms_data):
             try:
@@ -107,8 +175,11 @@ class SMSMongoUploader:
                     errors.append(f"SMS {i+1}: Missing both sender and body")
                     continue
                 
-                # Create unique identifier for duplicate detection
+                # 🚀 FIXED: Use unique_id as the ONLY identifier (compatible with old data)
                 doc["unique_id"] = f"{user_id}_sms_{i+1:06d}"
+                
+                # Add processing status field (default: not processed)
+                doc["is_processed"] = False
                 
                 validated_data.append(doc)
                 
@@ -123,6 +194,15 @@ class SMSMongoUploader:
                 print(f"   ... and {len(errors) - 5} more errors")
         
         print(f"✅ Validated {len(validated_data)} SMS documents for user: {user_id}")
+        
+        # Update user SMS statistics
+        if self.user_manager and len(validated_data) > 0:
+            self.user_manager.update_user_sms_stats(
+                user_id=user_id,
+                uploaded=len(validated_data)
+            )
+            print(f"   📊 Updated user statistics: +{len(validated_data)} SMS uploaded")
+        
         return validated_data
     
     def create_indexes(self):
@@ -131,7 +211,7 @@ class SMSMongoUploader:
             # Create indexes
             indexes = [
                 ("user_id", 1),      # For user-based queries
-                ("unique_id", 1),    # For duplicate detection
+                ("unique_id", 1),    # 🚀 FIXED: For duplicate detection using unique_id (compatible with old data)
                 ("sender", 1),       # For sender-based queries
                 ("date", -1),        # For date-based queries (descending)
                 ("uploaded_at", -1), # For upload tracking
@@ -145,15 +225,15 @@ class SMSMongoUploader:
                 except Exception as e:
                     print(f"⚠️  Index creation warning for {field}: {e}")
             
-            # Create unique index for duplicate prevention
+            # 🚀 FIXED: Create unique index for duplicate prevention using unique_id (compatible with old data)
             try:
                 self.collection.create_index(
                     [("unique_id", 1)], 
-                    unique=True, 
+                    unique=True,
                     background=True,
                     name="unique_sms_idx"
                 )
-                print("🔒 Created unique index for duplicate prevention")
+                print("🔒 Created unique index for duplicate prevention on unique_id")
             except Exception as e:
                 print(f"⚠️  Unique index warning: {e}")
                 
@@ -274,9 +354,12 @@ class SMSMongoUploader:
             return []
 
 def main():
-    parser = argparse.ArgumentParser(description="Upload SMS data to MongoDB")
+    parser = argparse.ArgumentParser(description="Upload SMS data to MongoDB with user management")
     parser.add_argument("--input", required=True, help="Path to SMS JSON file")
-    parser.add_argument("--user-id", help="User ID to assign to all SMS in this file")
+    parser.add_argument("--user-id", help="Existing user ID to assign to all SMS")
+    parser.add_argument("--user-name", help="User name (for new user creation)")
+    parser.add_argument("--user-email", help="User email (for new user creation)")
+    parser.add_argument("--user-phone", help="User phone (for new user creation)")
     parser.add_argument("--connection", default=MONGODB_URI, help="MongoDB connection string")
     parser.add_argument("--database", default=DATABASE_NAME, help="Database name")
     parser.add_argument("--collection", default=COLLECTION_NAME, help="Collection name")
@@ -284,19 +367,23 @@ def main():
     parser.add_argument("--clear-collection", action="store_true", help="Clear collection before upload")
     parser.add_argument("--create-indexes", action="store_true", help="Create performance indexes")
     parser.add_argument("--stats", action="store_true", help="Show collection statistics")
+    parser.add_argument("--user-stats", action="store_true", help="Show user statistics")
     
     args = parser.parse_args()
     
-    # Generate user_id from filename if not provided
-    if not args.user_id:
+    # Extract user info from filename if not provided
+    if not args.user_id and not args.user_name:
         filename = os.path.basename(args.input)
         # Extract name from filename (e.g., sms_data_divyam.json -> divyam)
         if filename.startswith("sms_data_") and filename.endswith(".json"):
-            args.user_id = filename[10:-5]  # Remove "sms_data_" prefix and ".json" suffix
-        else:
-            args.user_id = f"user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            extracted_name = filename[10:-5]  # Remove "sms_data_" prefix and ".json" suffix
+            args.user_name = extracted_name.title()  # Capitalize first letter
+            print(f"📁 Extracted user name from filename: {args.user_name}")
     
-    print(f"🆔 Using user_id: {args.user_id}")
+    if args.user_id:
+        print(f"🆔 Using existing user_id: {args.user_id}")
+    else:
+        print(f"👤 Will create/find user with: name={args.user_name}, email={args.user_email}, phone={args.user_phone}")
     
     # Initialize uploader
     uploader = SMSMongoUploader(
@@ -336,9 +423,18 @@ def main():
             print("❌ No SMS data to upload")
             return 1
         
-        # Validate data with user_id
-        print(f"\n✅ Validating {len(sms_data)} SMS records...")
-        validated_data = uploader.validate_sms_data(sms_data, args.user_id)
+        # Validate data with user management
+        print(f"\n✅ Validating {len(sms_data)} SMS records with user management...")
+        validated_data = uploader.validate_sms_data(
+            sms_data, 
+            user_id=args.user_id,
+            user_name=args.user_name,
+            user_email=args.user_email,
+            user_phone=args.user_phone
+        )
+        
+        # Get the final user_id from validated data
+        final_user_id = validated_data[0]["user_id"] if validated_data else "unknown"
         
         if not validated_data:
             print("❌ No valid SMS data to upload")
@@ -350,7 +446,7 @@ def main():
         
         # Show results
         print(f"\n📊 UPLOAD SUMMARY:")
-        print(f"   User ID: {args.user_id}")
+        print(f"   User ID: {final_user_id}")
         print(f"   Total Records: {len(sms_data)}")
         print(f"   Valid Records: {len(validated_data)}")
         print(f"   Successfully Inserted: {upload_stats['inserted']}")
@@ -359,6 +455,21 @@ def main():
         
         success_rate = (upload_stats['inserted'] / len(validated_data)) * 100
         print(f"   Success Rate: {success_rate:.1f}%")
+        
+        # Show user statistics if requested
+        if args.user_stats and uploader.user_manager:
+            print(f"\n👤 USER STATISTICS:")
+            user_doc = uploader.user_manager.get_user(final_user_id)
+            if user_doc:
+                stats = user_doc.get('sms_stats', {})
+                print(f"   Name: {user_doc.get('name', 'N/A')}")
+                print(f"   Email: {user_doc.get('email', 'N/A')}")
+                print(f"   Phone: {user_doc.get('phone', 'N/A')}")
+                print(f"   Total SMS Uploaded: {stats.get('total_uploaded', 0):,}")
+                print(f"   Total SMS Processed: {stats.get('total_processed', 0):,}")
+                print(f"   Total Financial SMS: {stats.get('total_financial', 0):,}")
+                print(f"   User Created: {user_doc.get('created_at', 'N/A')}")
+                print(f"   Last Upload: {stats.get('last_upload', 'N/A')}")
         
         # Show final stats
         if args.stats:
