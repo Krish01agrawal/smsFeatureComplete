@@ -98,3 +98,32 @@ python3 sms_mongodb_uploader.py --input more_sms.json --user-id "usr_EXISTING_US
 
 
 
+
+
+
+
+
+
+
+# 🚀 NEW: UNIFIED END-TO-END PIPELINE (SINGLE COMMAND)
+# ===================================================
+
+# Using existing user_id:
+python3 run_complete_pipeline.py --input test_sms.json --user-id "usr_d25b8256_20250922_012726_045eb0fc" --create-indexes
+
+# Using phone number (finds existing user or creates new):
+python3 run_complete_pipeline.py --input test_sms.json --phone "+91-9876543210" --name "Test User" --create-indexes
+
+# Creating new user with complete details:
+python3 run_complete_pipeline.py --input test_sms.json --name "John Doe" --phone "+91-9876543210" --email "john@example.com" --create-indexes
+
+# 📋 STEP-BY-STEP COMMANDS (MANUAL APPROACH)
+# ==========================================
+
+python3 user_manager.py --create --name "Test Working" --email "testworking@example.com" --phone "+91-9876543210"       
+
+python3 sms_mongodb_uploader.py --input test_sms.json --user-id "usr_d25b8256_20250922_012726_045eb0fc" --create-indexes --stats 
+
+python3 mongodb_pipeline.py --user-id "usr_d25b8256_20250922_012726_045eb0fc" --batch-size 2 --model "qwen3:8b"
+
+python3 convert_transaction_dates.py --db pluto_money --source financial_transactions --dest user_financial_transactions

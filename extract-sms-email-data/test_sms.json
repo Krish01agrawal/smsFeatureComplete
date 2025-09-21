@@ -246,6 +246,12 @@
     "type": "SmsMessageKind.received"
   },
   {
+    "sender": "VK-SBIPSG",
+    "body": "Dear Customer, INR 90,000.00 credited to your A/c No XX4128 on 03/03/2025 through NEFT with UTR YESOB50621206543 by STATION91 TECHNOLOGIES PRIVATE LIMI, INFO: BATCHID:0008 SALARY FEB 2025-SBI",
+    "date": "2025-03-03T05:12:18.704",
+    "type": "SmsMessageKind.received"
+  },
+  {
     "sender": "VM-HDFCBK-S",
     "body": "Sent Rs.289.00\nFrom HDFC Bank A/C *4685\nTo Blinkit\nOn 25/07/25\nRef 108658157453\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808\n",
     "date": "2025-07-25T01:54:11.826",

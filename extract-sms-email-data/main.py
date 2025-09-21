@@ -646,11 +646,13 @@ def safe_enrich(input_msg: Dict[str, Any], parsed: Dict[str, Any]) -> Dict[str, 
         if "original_text" not in parsed["metadata"]:
             parsed["metadata"]["original_text"] = input_msg.get("body", "")
         
-        # CRITICAL: Preserve user_id and email_id from input SMS for MongoDB storage
+        # CRITICAL: Preserve user_id, email_id, and phone from input SMS for MongoDB storage
         if "user_id" in input_msg:
             parsed["user_id"] = input_msg["user_id"]
         if "email_id" in input_msg:
             parsed["email_id"] = input_msg["email_id"]
+        if "phone" in input_msg:  # 🚀 NEW: Preserve phone field for easy filtering
+            parsed["phone"] = input_msg["phone"]
         
         # 🚀 FIXED: Use SAME unique_id from sms_data - NO other IDs
         if "unique_id" in input_msg:
