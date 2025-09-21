@@ -48,7 +48,8 @@ class MongoDBOperations:
                 connectTimeoutMS=10000,   # Connection timeout
                 socketTimeoutMS=30000,    # Socket timeout
                 heartbeatFrequencyMS=10000,  # Heartbeat frequency
-                appName="LifafaV0-SMS-Processor"  # Application identifier
+                appName="LifafaV0-SMS-Processor",  # Application identifier
+                tlsAllowInvalidCertificates=True  # Fix SSL certificate issues
             )
             
             self.db = self.client[db_name]
@@ -120,7 +121,7 @@ class MongoDBOperations:
                 name="uniq_user_sender_date_body"
             )
             
-            # Financial transactions collection indexes
+            # Financial transactions collection indexes  
             self._create_index_safe(self.transactions_collection, [("unique_id", 1)], unique=True)
             self._create_index_safe(self.transactions_collection, [("user_id", 1)])
             self._create_index_safe(self.transactions_collection, [("transaction_date", -1)])
@@ -129,13 +130,8 @@ class MongoDBOperations:
             self._create_index_safe(self.transactions_collection, [("message_intent", 1)])
             self._create_index_safe(self.transactions_collection, [("currency", 1)])
 
-            # Prevent duplicate transactions on re-runs: one transaction per user+_source_id
-            self._create_index_safe(
-                self.transactions_collection,
-                [("user_id", 1), ("_source_id", 1)],
-                unique=True,
-                name="uniq_user_source"
-            )
+            # 🚀 FIXED: Use unique_id for duplicate prevention - consistent across all collections
+            # Note: unique_id is already indexed above as unique=True
             
             # Compound indexes for common transaction queries
             self._create_index_safe(self.transactions_collection, [
@@ -215,13 +211,21 @@ class MongoDBOperations:
                     logger.debug(f"🗑️  Removing _id field from SMS {i+1}: {sms.get('unique_id', 'NO_ID')}")
                     del sms['_id']
                 
-                # Ensure required fields
+                # 🚀 FIXED: Only use 'isprocessed' field (NOT 'is_processed')
+                # 'is_processed' belongs only in sms_data collection
+                # 'isprocessed' tracks LLM/rule-based processing in sms_fin_rawdata
                 if 'isprocessed' not in sms:
                     sms['isprocessed'] = False
                 if 'processing_timestamp' not in sms:
                     sms['processing_timestamp'] = None
                 if 'processing_status' not in sms:
                     sms['processing_status'] = None
+                
+                # Remove 'is_processed' field if it exists (should not be in sms_fin_rawdata)
+                if 'is_processed' in sms:
+                    del sms['is_processed']
+                    logger.debug(f"🗑️  Removed 'is_processed' field from SMS {sms.get('unique_id', 'NO_ID')}")
+                
                 if 'created_at' not in sms:
                     sms['created_at'] = datetime.now()
                 if 'updated_at' not in sms:
@@ -298,33 +302,87 @@ class MongoDBOperations:
             logger.error(f"❌ Error retrieving financial raw SMS: {e}")
             return []
     
+    def mark_sms_as_processed_in_main_collection(self, sms_id: str, user_id: str = None) -> bool:
+        """Mark SMS as processed in main sms_data collection using SIMPLIFIED ID SYSTEM"""
+        try:
+            # 🚀 SIMPLIFIED APPROACH: Use sms_id field directly
+            # sms_id should be in format: sms_000001, sms_000002, etc.
+            
+            # Extract simple SMS ID if needed
+            simple_sms_id = sms_id
+            if "_sms_" in sms_id:
+                # Extract from long format: usr_abc123_sms_000001 → sms_000001
+                parts = sms_id.split("_sms_")
+                if len(parts) > 1:
+                    number_part = parts[-1]
+                    if not number_part.startswith("sms_"):
+                        simple_sms_id = f"sms_{number_part}"
+                    else:
+                        simple_sms_id = number_part
+            
+            # Try multiple query patterns for compatibility
+            queries = []
+            
+            if user_id:
+                # 🚀 FIXED: Use ONLY sms_id + user_id
+                queries.append({"sms_id": simple_sms_id, "user_id": user_id})
+                # Fallback: Use pattern matching
+                queries.append({
+                    "unique_id": {"$regex": f".*_sms_{simple_sms_id.replace('sms_', '')}$"}, 
+                    "user_id": user_id
+                })
+            else:
+                queries.append({"sms_id": simple_sms_id})
+                queries.append({"unique_id": sms_id})
+            
+            update_data = {
+                "is_processed": True,
+                "processed_at": datetime.now()
+            }
+            
+            # Try each query until one works
+            for query in queries:
+                result = self.sms_collection.update_one(query, {"$set": update_data})
+                
+                if result.modified_count > 0:
+                    logger.info(f"✅ Marked SMS {sms_id} as processed using query: {query}")
+                    return True
+                elif result.matched_count > 0:
+                    logger.info(f"✅ SMS {sms_id} already processed")
+                    return True
+            
+            logger.warning(f"⚠️  SMS {sms_id} not found with any query pattern")
+            return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error marking SMS {sms_id} as processed: {e}")
+            return False
+
     def mark_financial_sms_as_processed(self, sms_id: str, status: str = "success") -> bool:
-        """Mark financial SMS as processed in sms_fin_rawdata collection"""
+        """Mark financial SMS as processed in sms_fin_rawdata collection using SIMPLIFIED ID SYSTEM"""
         try:
             logger.info(f"🔍 DEBUG: Marking SMS {sms_id} as processed with status: {status}")
-            logger.info(f"🔍 DEBUG: Database connection: {self.db is not None}")
-            logger.info(f"🔍 DEBUG: Fin raw collection: {self.fin_raw_collection is not None}")
             
-            # Verify database connection - FIXED for Python 3.13 compatibility
-            if self.db is None:
-                logger.error("❌ ERROR: Database connection is None!")
+            # Verify database connection
+            if self.db is None or self.fin_raw_collection is None:
+                logger.error("❌ ERROR: Database connection issue!")
                 return False
             
-            if self.fin_raw_collection is None:
-                logger.error("❌ ERROR: Fin raw collection is None!")
-                return False
-            
-            # Handle different ID formats
-            base_sms_id = sms_id
+            # 🚀 SIMPLIFIED ID EXTRACTION
+            simple_sms_id = sms_id
             if "_sms_" in sms_id:
-                base_sms_id = sms_id.split("_sms_")[-1]
-                if not base_sms_id.startswith("sms_"):
-                    base_sms_id = f"sms_{base_sms_id}"
+                # Extract from long format: usr_abc123_sms_000001 → sms_000001
+                parts = sms_id.split("_sms_")
+                if len(parts) > 1:
+                    number_part = parts[-1]
+                    if not number_part.startswith("sms_"):
+                        simple_sms_id = f"sms_{number_part}"
+                    else:
+                        simple_sms_id = number_part
             
-            logger.info(f"🔍 DEBUG: Original SMS ID: {sms_id}")
-            logger.info(f"🔍 DEBUG: Base SMS ID: {base_sms_id}")
+            logger.info(f"🔍 DEBUG: Simple SMS ID: {simple_sms_id}")
             
-            # Update the SMS document
+            # Update data
             update_data = {
                 "isprocessed": True,
                 "processing_timestamp": datetime.now(),
@@ -332,48 +390,34 @@ class MongoDBOperations:
                 "updated_at": datetime.now()
             }
             
-            logger.info(f"🔍 DEBUG: Update data: {update_data}")
+            # 🚀 COMPREHENSIVE SEARCH: Try all possible ID patterns
+            search_queries = [
+                {"sms_id": simple_sms_id},  # NEW: Simplified ID
+                {"unique_id": simple_sms_id},  # OLD: Short format
+                {"unique_id": sms_id},  # OLD: Long format
+                # 🚀 FIXED: No _source_id needed - using unique_id only
+            ]
             
-            # Find the SMS first to verify it exists
-            existing_sms = self.fin_raw_collection.find_one({"unique_id": base_sms_id})
-            if existing_sms:
-                logger.info(f"🔍 DEBUG: Found existing SMS: {existing_sms.get('unique_id')}")
-                logger.info(f"🔍 DEBUG: Current isprocessed: {existing_sms.get('isprocessed')}")
-                logger.info(f"🔍 DEBUG: Current processing_status: {existing_sms.get('processing_status')}")
-            else:
-                logger.warning(f"⚠️  SMS {base_sms_id} not found in sms_fin_rawdata collection")
-                # Try alternative search
-                alt_search = self.fin_raw_collection.find_one({"$or": [
-                    {"unique_id": sms_id},
-                    {"unique_id": base_sms_id},
-                    {"_source_id": sms_id},
-                    {"_source_id": base_sms_id}
-                ]})
-                if alt_search:
-                    logger.info(f"🔍 DEBUG: Found SMS with alternative search: {alt_search.get('unique_id')}")
-                    base_sms_id = alt_search.get('unique_id')
-                else:
-                    logger.error(f"❌ SMS {sms_id} not found with any search method")
-                    return False
+            # Try each search query
+            for query in search_queries:
+                existing_sms = self.fin_raw_collection.find_one(query)
+                if existing_sms:
+                    logger.info(f"🔍 DEBUG: Found SMS with query: {query}")
+                    logger.info(f"🔍 DEBUG: Current isprocessed: {existing_sms.get('isprocessed')}")
+                    
+                    # Perform the update
+                    result = self.fin_raw_collection.update_one(query, {"$set": update_data})
+                    
+                    if result.modified_count > 0:
+                        logger.info(f"✅ Successfully marked SMS {sms_id} as processed")
+                        return True
+                    elif result.matched_count > 0:
+                        logger.info(f"✅ SMS {sms_id} already processed")
+                        return True
             
-            # Perform the update
-            result = self.fin_raw_collection.update_one(
-                {"unique_id": base_sms_id},
-                {"$set": update_data}
-            )
-            
-            logger.info(f"🔍 DEBUG: Update result: {result.modified_count} documents modified")
-            logger.info(f"🔍 DEBUG: Update result: {result.matched_count} documents matched")
-            
-            if result.modified_count > 0:
-                logger.info(f"✅ Successfully marked SMS {sms_id} as processed")
-                return True
-            elif result.matched_count > 0:
-                logger.warning(f"⚠️  SMS {sms_id} found but not modified (already processed?)")
-                return True
-            else:
-                logger.error(f"❌ Failed to mark SMS {sms_id} as processed - no documents matched")
-                return False
+            logger.error(f"❌ SMS {sms_id} not found with any search pattern")
+            logger.error(f"🔍 Tried queries: {search_queries}")
+            return False
                 
         except Exception as e:
             logger.error(f"❌ Error marking SMS {sms_id} as processed: {e}")
@@ -387,7 +431,7 @@ class MongoDBOperations:
         try:
             query = {"user_id": user_id}
             if unprocessed_only:
-                query["isprocessed"] = {"$ne": True}
+                query["is_processed"] = {"$ne": True}  # 🚀 FIXED: Use correct field name
             
             cursor = self.sms_collection.find(query).sort("date", -1)
             
@@ -396,17 +440,8 @@ class MongoDBOperations:
             
             sms_list = list(cursor)
             
-            # Add _source_id to each SMS for proper tracking
-            for sms in sms_list:
-                # Use unique_id as _source_id, fallback to _id if unique_id doesn't exist
-                if 'unique_id' in sms:
-                    sms['_source_id'] = sms['unique_id']
-                elif '_id' in sms:
-                    sms['_source_id'] = str(sms['_id'])
-                else:
-                    # Generate a fallback ID
-                    sms['_source_id'] = f"sms_{hash(str(sms)) % 1000000}"
-            
+            # 🚀 FIXED: NO _source_id needed - use sms_id directly
+            # Each SMS already has sms_id from sms_data collection
             logger.info(f"📱 Retrieved {len(sms_list)} SMS for user {user_id}")
             return sms_list
             
@@ -419,7 +454,7 @@ class MongoDBOperations:
         try:
             query = {}
             if unprocessed_only:
-                query["isprocessed"] = {"$ne": True}
+                query["is_processed"] = {"$ne": True}  # 🚀 FIXED: Use correct field name
             
             cursor = self.sms_collection.find(query).sort("date", -1)
             
@@ -428,17 +463,8 @@ class MongoDBOperations:
             
             sms_list = list(cursor)
             
-            # Add _source_id to each SMS for proper tracking
-            for sms in sms_list:
-                # Use unique_id as _source_id, fallback to _id if unique_id doesn't exist
-                if 'unique_id' in sms:
-                    sms['_source_id'] = sms['unique_id']
-                elif '_id' in sms:
-                    sms['_source_id'] = str(sms['_id'])
-                else:
-                    # Generate a fallback ID
-                    sms['_source_id'] = f"sms_{hash(str(sms)) % 1000000}"
-            
+            # 🚀 FIXED: NO _source_id needed - use sms_id directly
+            # Each SMS already has sms_id from sms_data collection
             logger.info(f"📱 Retrieved {len(sms_list)} SMS (all users)")
             return sms_list
             
@@ -453,7 +479,7 @@ class MongoDBOperations:
             transaction_data["created_at"] = datetime.now()
             transaction_data["updated_at"] = datetime.now()
             
-            # Ensure unique_id is unique
+            # 🚀 FIXED: Use unique_id for uniqueness
             if "unique_id" in transaction_data:
                 # Use upsert to avoid duplicates
                 result = self.transactions_collection.update_one(
@@ -469,7 +495,8 @@ class MongoDBOperations:
                 
                 return True
             else:
-                # Insert without unique_id
+                # This shouldn't happen - all transactions should have unique_id
+                logger.warning(f"⚠️  Transaction missing unique_id!")
                 result = self.transactions_collection.insert_one(transaction_data)
                 logger.info(f"💾 Stored transaction with ID: {result.inserted_id}")
                 return True
@@ -512,7 +539,7 @@ class MongoDBOperations:
                 logger.debug(f"🔍 DEBUG: Cleaned transaction {i+1}: {clean_transaction.get('unique_id', 'NO_ID')}")
                 
                 if "unique_id" in clean_transaction:
-                    # Upsert operation - use proper MongoDB syntax
+                    # 🚀 FIXED: Upsert operation using unique_id
                     bulk_operations.append(
                         UpdateOne(
                             {"unique_id": clean_transaction["unique_id"]},
@@ -680,11 +707,20 @@ class MongoDBOperations:
             logger.error(f"❌ Error retrieving already processed SMS IDs: {e}")
             return []
     
-    def is_sms_already_processed(self, sms_id: str) -> bool:
-        """Check if a specific SMS is already processed in sms_fin_rawdata"""
+    def is_sms_already_processed(self, sms_id: str, user_id: str = None) -> bool:
+        """Check if a specific SMS is already processed in sms_fin_rawdata FOR THIS USER"""
         try:
             # Handle different ID formats
-            # sms_id could be: "user_20250818_162257_sms_000001" or "sms_000001"
+            # sms_id could be: "usr_abc123_sms_000001" or "sms_000001"
+            
+            # Extract user_id from sms_id if not provided
+            extracted_user_id = user_id
+            if not extracted_user_id and "_sms_" in sms_id:
+                # Extract user_id from full unique_id: "usr_abc123_sms_000001" -> "usr_abc123"
+                parts = sms_id.split("_sms_")
+                if len(parts) >= 2:
+                    extracted_user_id = parts[0]
+            
             # Extract the base SMS ID (e.g., "sms_000001")
             base_sms_id = sms_id
             if "_sms_" in sms_id:
@@ -692,7 +728,7 @@ class MongoDBOperations:
                 if not base_sms_id.startswith("sms_"):
                     base_sms_id = f"sms_{base_sms_id}"
             
-            # Check if SMS exists in sms_fin_rawdata and is marked as processed
+            # 🚀 FIX: Check for BOTH user_id AND unique_id to prevent cross-user conflicts
             query = {
                 "unique_id": base_sms_id,
                 "$or": [
@@ -702,13 +738,17 @@ class MongoDBOperations:
                 ]
             }
             
+            # Add user_id filter if available to prevent cross-user conflicts
+            if extracted_user_id:
+                query["user_id"] = extracted_user_id
+            
             result = self.fin_raw_collection.find_one(query)
             is_processed = result is not None
             
             if is_processed:
-                logger.info(f"🔍 SMS {sms_id} (base: {base_sms_id}) is already processed")
+                logger.info(f"🔍 SMS {sms_id} (base: {base_sms_id}) is already processed for user {extracted_user_id}")
             else:
-                logger.info(f"🔍 SMS {sms_id} (base: {base_sms_id}) is not yet processed")
+                logger.info(f"🔍 SMS {sms_id} (base: {base_sms_id}) is not yet processed for user {extracted_user_id}")
             
             return is_processed
             

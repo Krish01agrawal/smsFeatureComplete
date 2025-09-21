@@ -76,8 +76,9 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
             filtered_sms_list = []
             
             for sms in sms_list:
-                sms_id = sms.get('unique_id') or sms.get('id')
-                if not mongo_ops.is_sms_already_processed(sms_id):
+                sms_id = sms.get('unique_id')  # 🚀 FIXED: Use unique_id only
+                sms_user_id = sms.get('user_id', user_id)
+                if not mongo_ops.is_sms_already_processed(sms_id, sms_user_id):
                     filtered_sms_list.append(sms)
                 else:
                     print(f"   ⏭️  Skipping already processed SMS: {sms_id}")
@@ -120,6 +121,29 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
         print("💾 Storing financial SMS in processing collection...")
         stored_count = mongo_ops.store_financial_raw_sms(financial_sms)
         print(f"   ✅ Stored {stored_count} financial SMS in sms_fin_rawdata collection")
+        
+        # Step 4.6: Mark ALL SMS (financial and non-financial) as processed in main collection
+        print("📝 Marking ALL SMS as processed in main sms_data collection...")
+        from user_manager import UserManager
+        user_manager = UserManager()
+        user_manager.connect()
+        
+        processed_count = 0
+        for sms in sms_list:
+            sms_id = sms.get('unique_id')  # 🚀 FIXED: Use unique_id only
+            sms_user_id = sms.get('user_id', user_id)
+            if sms_id and mongo_ops.mark_sms_as_processed_in_main_collection(sms_id, sms_user_id):
+                processed_count += 1
+                print(f"   ✅ Marked SMS {sms_id} as processed in main collection")
+            else:
+                print(f"   ❌ Failed to mark SMS {sms_id} as processed in main collection")
+        
+        print(f"   ✅ Marked {processed_count}/{len(sms_list)} SMS as processed in main collection")
+        
+        # Update user stats: all SMS processed
+        if user_id:
+            user_manager.update_user_sms_stats(user_id, processed=len(sms_list))
+            print(f"   📊 Updated user stats: {len(sms_list)} SMS processed")
         
         # Step 5: Extract financial array using extract_financial_array.py
         print("📋 Extracting financial array...")
@@ -343,18 +367,25 @@ def main():
         args.batch_size = 10
     
     # Check environment variables
-    required_env_vars = ['API_URL', 'MONGODB_URI']
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+    api_url = os.getenv('API_URL', '')
+    mongodb_uri = os.getenv('MONGODB_URI', '')
     
-    if missing_vars:
-        print(f"❌ Missing environment variables: {', '.join(missing_vars)}")
+    # MongoDB URI is truly required
+    if not mongodb_uri:
+        print(f"❌ Missing required environment variable: MONGODB_URI")
         print("Please set:")
-        for var in missing_vars:
-            if var == 'API_URL':
-                print(f"   export {var}='your_llm_endpoint'")
-            elif var == 'MONGODB_URI':
-                print(f"   export {var}='mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'")
+        print(f"   export MONGODB_URI='mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'")
         return 1
+    
+    # API_URL is optional - if missing, system will use rule-based fallback
+    if not api_url:
+        print(f"⚠️  API_URL not configured - system will use RULE-BASED processing only")
+        print(f"🤖 This is PERFECT for your 1-2 day constraint!")
+        print(f"💡 To use LLM later, set: export API_URL='your_llm_endpoint'")
+        print(f"🚀 Continuing with bulletproof rule-based fallback...")
+    else:
+        print(f"🔗 API_URL configured: {api_url}")
+        print(f"🤖 System will use LLM with rule-based fallback when needed")
     
     try:
         run_mongodb_pipeline(

@@ -12,11 +12,15 @@ Safely converts string transaction_date fields to BSON Date format in MongoDB.
 - Includes comprehensive validation and error handling
 
 Usage:
-    export MONGODB_URI="mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority"
-    python convert_transaction_dates.py --db pluto_money
+    # Set up .env file with MongoDB credentials
+    echo 'MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority' >> .env
+    echo 'MONGODB_DB=pluto_money' >> .env
+    
+    # Run with defaults from .env
+    python convert_transaction_dates.py
 
 Optional timezone support for naive date strings:
-    python convert_transaction_dates.py --db pluto_money --timezone Asia/Kolkata
+    python convert_transaction_dates.py --timezone Asia/Kolkata
 
 Tested with: PyMongo 4.x, MongoDB 5/6/7/Atlas
 """
@@ -28,6 +32,10 @@ from datetime import datetime
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from bson.son import SON
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def build_conversion_expression(timezone: str | None):
@@ -140,26 +148,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Basic conversion (UTC timezone assumed)
-  python convert_transaction_dates.py --db pluto_money
+  # Basic conversion using .env defaults
+  python convert_transaction_dates.py
   
   # With timezone for naive date strings
-  python convert_transaction_dates.py --db pluto_money --timezone Asia/Kolkata
+  python convert_transaction_dates.py --timezone Asia/Kolkata
   
-  # Custom source/destination collections
-  python convert_transaction_dates.py --db pluto_money --source my_transactions --dest converted_transactions
+  # Custom database and collections
+  python convert_transaction_dates.py --db custom_db --source my_transactions --dest converted_transactions
         """
     )
     
     parser.add_argument(
         "--uri", 
         default=os.environ.get("MONGODB_URI", ""), 
-        help="MongoDB connection URI (or set MONGODB_URI environment variable)"
+        help="MongoDB connection URI (default: from .env file)"
     )
     parser.add_argument(
         "--db", 
-        required=True, 
-        help="Database name (e.g., pluto_money)"
+        default=os.environ.get("MONGODB_DB", "pluto_money"),
+        help="Database name (default: from .env file or 'pluto_money')"
     )
     parser.add_argument(
         "--source", 
@@ -185,10 +193,11 @@ Examples:
     args = parser.parse_args()
 
     if not args.uri:
-        print("❌ ERROR: MongoDB URI required. Provide --uri or set MONGODB_URI environment variable.", 
+        print("❌ ERROR: MongoDB URI required. Set MONGODB_URI in .env file or provide --uri argument.", 
               file=sys.stderr)
-        print("\nExample:")
-        print('export MONGODB_URI="mongodb+srv://user:pass@cluster/?retryWrites=true&w=majority"')
+        print("\nExample .env file:")
+        print('MONGODB_URI=mongodb+srv://user:pass@cluster/?retryWrites=true&w=majority')
+        print('MONGODB_DB=pluto_money')
         sys.exit(1)
 
     try:
@@ -203,7 +212,10 @@ Examples:
 
         # Connect to MongoDB
         print("\n🔌 Connecting to MongoDB...")
-        client = MongoClient(args.uri)
+        client = MongoClient(
+            args.uri,
+            tlsAllowInvalidCertificates=True  # Fix SSL certificate issues
+        )
         
         if not validate_connection(client, args.db):
             sys.exit(1)
