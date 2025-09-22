@@ -160,14 +160,14 @@ def parse_iso_date(date_str: str) -> datetime:
         except ValueError:
             raise ValueError(f"Invalid date format: {date_str}")
 
-async def run_pipeline_async(user_id: str, sms_file_path: str, batch_size: int, model: str, 
+async def run_pipeline_async(user_id: str, user_phone: str, sms_file_path: str, batch_size: int, model: str, 
                            create_indexes: bool, skip_date_conversion: bool) -> Dict[str, Any]:
     """Run the complete SMS processing pipeline asynchronously"""
     
     cmd = [
         "python3", "run_complete_pipeline.py",
         "--input", sms_file_path,
-        "--user-id", user_id,
+        "--phone", user_phone,
         "--batch-size", str(batch_size),
         "--model", model
     ]
@@ -263,6 +263,7 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
         from bson import ObjectId
         
         user = None
+        user_id_obj = None
         try:
             # Try ObjectId lookup first
             user_id_obj = ObjectId(request.user_id)
@@ -270,6 +271,8 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
         except:
             # Fallback to string user_id lookup (backward compatibility)
             user = users_collection.find_one({"user_id": request.user_id})
+            if user and user.get("_id"):
+                user_id_obj = user["_id"]
         
         if not user:
             raise HTTPException(
@@ -284,9 +287,17 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
             json.dump(sms_data_list, temp_file, indent=2)
             temp_file_path = temp_file.name
         
-        # Run pipeline asynchronously
+        # Run pipeline asynchronously using phone number for better user identification
+        user_phone = user.get("phone") if user else None
+        if not user_phone:
+            raise HTTPException(
+                status_code=400,
+                detail="User phone number not found - required for SMS processing"
+            )
+        
         result = await run_pipeline_async(
-            user_id=request.user_id,
+            user_id=str(user_id_obj) if user_id_obj else request.user_id,
+            user_phone=user_phone,
             sms_file_path=temp_file_path,
             batch_size=request.batch_size,
             model=request.model,
@@ -360,8 +371,21 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
     """
     
     try:
-        # Validate user exists
-        user = users_collection.find_one({"user_id": request.user_id})
+        # Validate user exists (handle both ObjectId and string user_id)
+        from bson import ObjectId
+        
+        user = None
+        user_id_obj = None
+        try:
+            # Try ObjectId lookup first
+            user_id_obj = ObjectId(request.user_id)
+            user = users_collection.find_one({"_id": user_id_obj})
+        except:
+            # Fallback to string user_id lookup (backward compatibility)
+            user = users_collection.find_one({"user_id": request.user_id})
+            if user and user.get("_id"):
+                user_id_obj = user["_id"]
+        
         if not user:
             raise HTTPException(
                 status_code=404,
@@ -381,9 +405,7 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
             start_date, end_date = get_date_range('last_month')
             period_str = "last_month_default"
         
-        # Query transactions (handle both ObjectId and string user_id)
-        from bson import ObjectId
-        
+        # Query transactions using the resolved user_id_obj
         query = {
             "transaction_date": {
                 "$gte": start_date,
@@ -391,11 +413,10 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
             }
         }
         
-        # Try ObjectId first, fallback to string
-        try:
-            user_id_obj = ObjectId(request.user_id)
+        # Use the resolved user_id_obj or fallback to string
+        if user_id_obj:
             query["user_id"] = user_id_obj
-        except:
+        else:
             query["user_id"] = request.user_id
         
         transactions = list(user_financial_transactions_collection.find(query))
@@ -575,8 +596,18 @@ async def get_user_transactions(
     """
     
     try:
-        # Build query
-        query = {"user_id": user_id}
+        # Build query with proper user_id handling
+        from bson import ObjectId
+        
+        user_id_obj = None
+        try:
+            # Try ObjectId lookup first
+            user_id_obj = ObjectId(user_id)
+        except:
+            # Keep as string if conversion fails
+            pass
+        
+        query = {"user_id": user_id_obj if user_id_obj else user_id}
         
         if transaction_type:
             if transaction_type not in ['credit', 'debit']:
@@ -648,8 +679,21 @@ async def get_user_summary(user_id: str = PathParam(..., description="User ID"))
     """
     
     try:
-        # Get user profile
-        user = users_collection.find_one({"user_id": user_id})
+        # Get user profile (handle both ObjectId and string user_id)
+        from bson import ObjectId
+        
+        user = None
+        user_id_obj = None
+        try:
+            # Try ObjectId lookup first
+            user_id_obj = ObjectId(user_id)
+            user = users_collection.find_one({"_id": user_id_obj})
+        except:
+            # Fallback to string user_id lookup (backward compatibility)
+            user = users_collection.find_one({"user_id": user_id})
+            if user and user.get("_id"):
+                user_id_obj = user["_id"]
+        
         if not user:
             raise HTTPException(
                 status_code=404,
@@ -665,7 +709,9 @@ async def get_user_summary(user_id: str = PathParam(..., description="User ID"))
         recent_analytics = await get_financial_analytics(analytics_request)
         
         # Get transaction counts by type
-        total_transactions = user_financial_transactions_collection.count_documents({"user_id": user_id})
+        total_transactions = user_financial_transactions_collection.count_documents(
+            {"user_id": user_id_obj if user_id_obj else user_id}
+        )
         
         return {
             "user_profile": {
