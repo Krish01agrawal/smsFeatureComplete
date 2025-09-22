@@ -131,3 +131,11 @@ python3 sms_mongodb_uploader.py --input test_sms.json --user-id "usr_d25b8256_20
 python3 mongodb_pipeline.py --user-id "usr_d25b8256_20250922_012726_045eb0fc" --batch-size 2 --model "qwen3:8b"
 
 python3 convert_transaction_dates.py --db pluto_money --source financial_transactions --dest user_financial_transactions
+
+
+
+
+
+
+
+ uvicorn api_server:app --host 0.0.0.0 --port 8001 --reload

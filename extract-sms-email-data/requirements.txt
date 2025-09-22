@@ -6,3 +6,52 @@ psutil>=5.8.0
 statistics
 asyncio
 python-dateutil>=2.8.0
+
+
+# FastAPI SMS Processing & Analytics API Dependencies
+# ================================================
+
+# Core FastAPI and web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# Database
+pymongo==4.6.0
+motor==3.3.2  # Async MongoDB driver
+
+# Data processing and analytics
+pandas==2.1.4
+numpy==1.24.4
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Date and time handling
+python-dateutil==2.8.2
+
+# HTTP client for external API calls (if needed)
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Logging and monitoring
+python-json-logger==2.0.7
+
+# Security (for production deployment)
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# CORS support
+fastapi-cors==0.0.6
+
+# Background tasks and job processing
+celery==5.3.4  # Optional for heavy background processing
+redis==5.0.1   # Optional for task queue
+
+# Development and testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+requests==2.31.0
+
+# Production deployment
+gunicorn==21.2.0
