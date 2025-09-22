@@ -286,7 +286,24 @@ Examples:
             
             if source_user_ids:
                 # Check if ANY of the source users already have data in destination
-                source_users_count = dst_collection.count_documents({"user_id": {"$in": source_user_ids}})
+                # Use individual queries to avoid $in issues with mixed ObjectId/string types
+                from bson import ObjectId
+                source_users_count = 0
+                
+                for uid in source_user_ids:
+                    try:
+                        # Try both ObjectId and string formats
+                        count_objid = dst_collection.count_documents({"user_id": ObjectId(uid) if isinstance(uid, str) else uid})
+                        count_string = dst_collection.count_documents({"user_id": str(uid)}) if count_objid == 0 else 0
+                        source_users_count += max(count_objid, count_string)
+                    except Exception as e:
+                        # If ObjectId conversion fails, try as string
+                        try:
+                            count_string = dst_collection.count_documents({"user_id": str(uid)})
+                            source_users_count += count_string
+                        except:
+                            pass  # Skip this user_id if both fail
+                
                 print(f"   📊 Documents for source users in destination: {source_users_count:,}")
                 
                 if source_users_count > 0:
@@ -324,8 +341,23 @@ Examples:
         
         # 🚀 NEW: Add user-specific filtering if requested
         if args.user_id:
-            match_criteria["user_id"] = args.user_id
-            print(f"   🎯 Filtering for specific user_id: {args.user_id}")
+            # Handle both ObjectId and string user_id
+            from bson import ObjectId
+            try:
+                # Try to convert string user_id to ObjectId
+                if isinstance(args.user_id, str):
+                    try:
+                        match_criteria["user_id"] = ObjectId(args.user_id)
+                        print(f"   🎯 Filtering for specific user_id (ObjectId): {args.user_id}")
+                    except:
+                        match_criteria["user_id"] = args.user_id
+                        print(f"   🎯 Filtering for specific user_id (string): {args.user_id}")
+                else:
+                    match_criteria["user_id"] = args.user_id
+                    print(f"   🎯 Filtering for specific user_id: {args.user_id}")
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not process user_id filter: {e}")
+                match_criteria["user_id"] = args.user_id
         elif args.phone:
             match_criteria["phone"] = args.phone
             print(f"   🎯 Filtering for specific phone: {args.phone}")

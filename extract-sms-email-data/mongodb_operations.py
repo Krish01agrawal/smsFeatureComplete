@@ -26,55 +26,82 @@ class MongoDBOperations:
     """MongoDB operations for LifafaV0 financial data pipeline"""
     
     def __init__(self, connection_string: str = None, db_name: str = None):
-        """Initialize MongoDB connection with connection pooling"""
+        """Initialize MongoDB connection with connection pooling and retry mechanism"""
+        # Use environment variable or default
+        if connection_string is None:
+            connection_string = os.getenv('MONGODB_URI', 'mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
+        
+        if db_name is None:
+            db_name = os.getenv('MONGODB_DB', 'pluto_money')
+        
+        self.connection_string = connection_string
+        self.db_name = db_name
+        
+        # Retry configuration for network resilience
+        self.max_retries = 3
+        self.retry_delay = 5  # seconds
+        
+        self._connect_with_retry()
+    
+    def _connect_with_retry(self):
+        """Connect to MongoDB with retry mechanism for network resilience"""
+        import time
+        
+        for attempt in range(self.max_retries):
+            try:
+                logger.info(f"🔄 MongoDB connection attempt {attempt + 1}/{self.max_retries}")
+                
+                # Enhanced connection with pooling and optimization
+                self.client = MongoClient(
+                    self.connection_string,
+                    maxPoolSize=50,           # Maximum connections in pool
+                    minPoolSize=10,           # Minimum connections to maintain
+                    maxIdleTimeMS=30000,      # Close idle connections after 30s
+                    waitQueueTimeoutMS=5000,  # Wait up to 5s for available connection
+                    retryWrites=True,         # Retry write operations on failure
+                    retryReads=True,          # Retry read operations on failure
+                    serverSelectionTimeoutMS=10000,  # Increased server selection timeout
+                    connectTimeoutMS=15000,   # Increased connection timeout
+                    socketTimeoutMS=30000,    # Socket timeout
+                    heartbeatFrequencyMS=10000,  # Heartbeat frequency
+                    appName="LifafaV0-SMS-Processor",  # Application identifier
+                    tlsAllowInvalidCertificates=True  # Fix SSL certificate issues
+                )
+                
+                self.db = self.client[self.db_name]
+                
+                # Collections
+                self.sms_collection = self.db['sms_data']  # Raw SMS (never modified)
+                self.fin_raw_collection = self.db['sms_fin_rawdata']  # Financial SMS with processing status
+                self.transactions_collection = self.db['financial_transactions']  # Final processed results
+                
+                # Test connection with timeout
+                self.client.admin.command('ping')
+                logger.info(f"✅ Connected to MongoDB: {self.connection_string}")
+                logger.info(f"✅ Database: {self.db_name}")
+                logger.info(f"🔗 Connection pool: max={50}, min={10}")
+                
+                # Create indexes
+                self._create_indexes()
+                return  # Success, exit retry loop
+                
+            except Exception as e:
+                logger.warning(f"⚠️ MongoDB connection attempt {attempt + 1} failed: {e}")
+                if attempt < self.max_retries - 1:
+                    logger.info(f"🔄 Retrying in {self.retry_delay} seconds...")
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error(f"❌ MongoDB connection failed after {self.max_retries} attempts")
+                    raise
+    
+    def _ensure_connection(self):
+        """Ensure MongoDB connection is alive, reconnect if needed"""
         try:
-            # Use environment variable or default
-            if connection_string is None:
-                connection_string = os.getenv('MONGODB_URI', 'mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
-            
-            if db_name is None:
-                db_name = os.getenv('MONGODB_DB', 'pluto_money')
-            
-            # Enhanced connection with pooling and optimization
-            self.client = MongoClient(
-                connection_string,
-                maxPoolSize=50,           # Maximum connections in pool
-                minPoolSize=10,           # Minimum connections to maintain
-                maxIdleTimeMS=30000,      # Close idle connections after 30s
-                waitQueueTimeoutMS=5000,  # Wait up to 5s for available connection
-                retryWrites=True,         # Retry write operations on failure
-                retryReads=True,          # Retry read operations on failure
-                serverSelectionTimeoutMS=5000,  # Fast server selection
-                connectTimeoutMS=10000,   # Connection timeout
-                socketTimeoutMS=30000,    # Socket timeout
-                heartbeatFrequencyMS=10000,  # Heartbeat frequency
-                appName="LifafaV0-SMS-Processor",  # Application identifier
-                tlsAllowInvalidCertificates=True  # Fix SSL certificate issues
-            )
-            
-            self.db = self.client[db_name]
-            self.db_name = db_name
-            
-            # Collections
-            self.sms_collection = self.db['sms_data']  # Raw SMS (never modified)
-            self.fin_raw_collection = self.db['sms_fin_rawdata']  # Financial SMS with processing status
-            self.transactions_collection = self.db['financial_transactions']  # Final processed results
-            
-            # Test connection
+            # Test if connection is still alive
             self.client.admin.command('ping')
-            logger.info(f"✅ Connected to MongoDB: {connection_string}")
-            logger.info(f"✅ Database: {self.db_name}")
-            logger.info(f"🔗 Connection pool: max={50}, min={10}")
-            
-            # Create indexes
-            self._create_indexes()
-            
-        except ConnectionFailure as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
-            raise
         except Exception as e:
-            logger.error(f"❌ MongoDB initialization error: {e}")
-            raise
+            logger.warning(f"⚠️ MongoDB connection lost, attempting to reconnect: {e}")
+            self._connect_with_retry()
     
     def _create_indexes(self):
         """Create advanced database indexes for optimal performance"""
@@ -280,12 +307,20 @@ class MongoDBOperations:
                 logger.error(f"📋 Error details: {e.details}")
             return 0
     
-    def get_financial_raw_sms(self, user_id: str = None, unprocessed_only: bool = True, limit: int = None) -> List[Dict[str, Any]]:
+    def get_financial_raw_sms(self, user_id = None, unprocessed_only: bool = True, limit: int = None) -> List[Dict[str, Any]]:
         """Get financial SMS from sms_fin_rawdata collection"""
         try:
+            from bson import ObjectId
+            
             # Build query
             query = {}
             if user_id:
+                # Convert to ObjectId if it's a string
+                if isinstance(user_id, str):
+                    try:
+                        user_id = ObjectId(user_id)
+                    except:
+                        pass  # Keep as string if conversion fails
                 query["user_id"] = user_id
             if unprocessed_only:
                 query["isprocessed"] = {"$ne": True}
@@ -427,9 +462,18 @@ class MongoDBOperations:
             logger.error(f"🔍 DEBUG: Full traceback: {traceback.format_exc()}")
             return False
     
-    def get_user_sms_data(self, user_id: str, limit: int = None, unprocessed_only: bool = True) -> List[Dict[str, Any]]:
+    def get_user_sms_data(self, user_id, limit: int = None, unprocessed_only: bool = True) -> List[Dict[str, Any]]:
         """Get SMS data for a specific user"""
         try:
+            from bson import ObjectId
+            
+            # Convert to ObjectId if it's a string
+            if isinstance(user_id, str):
+                try:
+                    user_id = ObjectId(user_id)
+                except:
+                    pass  # Keep as string if conversion fails
+            
             query = {"user_id": user_id}
             if unprocessed_only:
                 query["is_processed"] = {"$ne": True}  # 🚀 FIXED: Use correct field name
@@ -590,8 +634,13 @@ class MongoDBOperations:
                 if isinstance(value, (str, int, float, bool)):
                     clean_transaction[key] = value
                 elif isinstance(value, dict):
-                    # Recursively clean nested dictionaries
-                    clean_transaction[key] = self._clean_transaction_document(value)
+                    # Check if it's an ObjectId in JSON format
+                    if "$oid" in value:
+                        from bson import ObjectId
+                        clean_transaction[key] = ObjectId(value["$oid"])
+                    else:
+                        # Recursively clean nested dictionaries
+                        clean_transaction[key] = self._clean_transaction_document(value)
                 elif isinstance(value, list):
                     # Clean list items
                     clean_transaction[key] = [
@@ -599,6 +648,9 @@ class MongoDBOperations:
                         for item in value if item is not None
                     ]
                 elif isinstance(value, datetime):
+                    clean_transaction[key] = value
+                elif hasattr(value, '__class__') and value.__class__.__name__ == 'ObjectId':
+                    # Preserve ObjectId type
                     clean_transaction[key] = value
                 else:
                     # Convert other types to string

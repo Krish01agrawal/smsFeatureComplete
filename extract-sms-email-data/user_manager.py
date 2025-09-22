@@ -202,10 +202,10 @@ class UserManager:
     def create_user(self, name: str = None, email: str = None, phone: str = None, 
                    metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Create a new user with globally unique ID
+        Create a new user using MongoDB's native ObjectId as user_id
         
         Returns:
-            dict: User creation result with user_id, status, and details
+            dict: User creation result with user_id (ObjectId), status, and details
         """
         
         # Validate input
@@ -220,19 +220,21 @@ class UserManager:
         
         cleaned_data = validation["cleaned_data"]
         
-        # Generate unique user ID
-        user_id = self.generate_unique_user_id(
-            cleaned_data["name"], 
-            cleaned_data["email"], 
-            cleaned_data["phone"]
-        )
-        
-        # Create user document
+        # Create user document with temporary ObjectId for user_id field
         now = datetime.utcnow()
+        from bson import ObjectId
+        temp_user_id = ObjectId()  # Generate temporary ObjectId
+        
+        # Handle email field to avoid unique index conflicts
+        email_value = cleaned_data["email"]
+        if email_value is None:
+            # For null emails, use a unique identifier to avoid unique index conflicts
+            email_value = f"temp_email_{temp_user_id}"
+        
         user_doc = {
-            "user_id": user_id,
+            "user_id": temp_user_id,  # Include user_id field to satisfy unique index
             "name": cleaned_data["name"],
-            "email": cleaned_data["email"],
+            "email": email_value,  # Use processed email value
             "phone": cleaned_data["phone"],
             "is_active": True,
             "created_at": now,
@@ -248,42 +250,27 @@ class UserManager:
         }
         
         try:
-            # Insert user into database
-            self.users_collection.insert_one(user_doc)
+            # Insert user into database - MongoDB generates _id automatically
+            result = self.users_collection.insert_one(user_doc)
+            actual_user_id = result.inserted_id  # This is the MongoDB ObjectId
+            
+            # Update user_id to match the actual _id
+            self.users_collection.update_one(
+                {"_id": actual_user_id},
+                {"$set": {"user_id": actual_user_id}}
+            )
+            
+            # Update user_doc for return
+            user_doc["user_id"] = actual_user_id
+            user_doc["_id"] = actual_user_id
             
             return {
                 "success": True,
-                "user_id": user_id,
+                "user_id": actual_user_id,  # MongoDB ObjectId
                 "user_doc": user_doc,
                 "errors": [],
                 "warnings": validation["warnings"]
             }
-            
-        except DuplicateKeyError:
-            # Extremely rare case - regenerate ID and try once more
-            user_id = self.generate_unique_user_id(
-                cleaned_data["name"], 
-                cleaned_data["email"], 
-                cleaned_data["phone"]
-            )
-            user_doc["user_id"] = user_id
-            
-            try:
-                self.users_collection.insert_one(user_doc)
-                return {
-                    "success": True,
-                    "user_id": user_id,
-                    "user_doc": user_doc,
-                    "errors": [],
-                    "warnings": validation["warnings"] + ["User ID regenerated due to collision"]
-                }
-            except Exception as e:
-                return {
-                    "success": False,
-                    "user_id": None,
-                    "errors": [f"Failed to create user after retry: {e}"],
-                    "warnings": validation["warnings"]
-                }
                 
         except Exception as e:
             return {
@@ -293,28 +280,75 @@ class UserManager:
                 "warnings": validation["warnings"]
             }
     
-    def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get user by user_id"""
+    def get_user(self, user_id) -> Optional[Dict[str, Any]]:
+        """Get user by user_id (ObjectId or string)"""
         try:
-            user = self.users_collection.find_one({"user_id": user_id})
+            from bson import ObjectId
+            
+            # Try to convert to ObjectId if it's a string
+            if isinstance(user_id, str):
+                try:
+                    user_id = ObjectId(user_id)
+                except:
+                    # If conversion fails, search by string user_id (backward compatibility)
+                    user = self.users_collection.find_one({"user_id": user_id})
+                    return user
+            
+            # Search by _id (ObjectId)
+            user = self.users_collection.find_one({"_id": user_id})
             return user
+            
         except Exception as e:
             print(f"❌ Error getting user {user_id}: {e}")
             return None
     
-    def user_exists(self, user_id: str) -> bool:
-        """Check if user exists"""
+    def user_exists(self, user_id) -> bool:
+        """Check if user exists by ObjectId or string"""
         try:
-            count = self.users_collection.count_documents({"user_id": user_id})
+            from bson import ObjectId
+            
+            # Try to convert to ObjectId if it's a string
+            if isinstance(user_id, str):
+                try:
+                    user_id = ObjectId(user_id)
+                    count = self.users_collection.count_documents({"_id": user_id})
+                    return count > 0
+                except:
+                    # If conversion fails, search by string user_id (backward compatibility)
+                    count = self.users_collection.count_documents({"user_id": user_id})
+                    return count > 0
+            
+            # Search by _id (ObjectId)
+            count = self.users_collection.count_documents({"_id": user_id})
             return count > 0
+            
         except Exception as e:
             print(f"❌ Error checking user existence: {e}")
             return False
     
-    def update_user_sms_stats(self, user_id: str, uploaded: int = 0, processed: int = 0, 
+    def find_user_by_phone(self, phone: str) -> Optional[Dict[str, Any]]:
+        """Find user by phone number"""
+        try:
+            user = self.users_collection.find_one({"phone": phone})
+            return user
+        except Exception as e:
+            print(f"❌ Error finding user by phone: {e}")
+            return None
+    
+    def update_user_sms_stats(self, user_id, uploaded: int = 0, processed: int = 0, 
                              financial: int = 0) -> bool:
         """Update user SMS statistics"""
         try:
+            from bson import ObjectId
+            
+            # Convert to ObjectId if it's a string
+            if isinstance(user_id, str):
+                try:
+                    user_id = ObjectId(user_id)
+                except:
+                    # If conversion fails, use string user_id (backward compatibility)
+                    pass
+            
             now = datetime.utcnow()
             update_doc = {
                 "$inc": {
@@ -332,11 +366,13 @@ class UserManager:
             if processed > 0:
                 update_doc["$set"]["sms_stats.last_processing"] = now
             
-            result = self.users_collection.update_one(
-                {"user_id": user_id},
-                update_doc
-            )
+            # Determine search criteria
+            if isinstance(user_id, ObjectId):
+                search_criteria = {"_id": user_id}
+            else:
+                search_criteria = {"user_id": user_id}
             
+            result = self.users_collection.update_one(search_criteria, update_doc)
             return result.modified_count > 0
             
         except Exception as e:
@@ -532,7 +568,7 @@ def main():
             
             if user:
                 print(f"✅ User found!")
-                print(f"   User ID: {user['user_id']}")
+                print(f"   User ID: {user.get('_id', user.get('user_id', 'N/A'))}")
                 print(f"   Name: {user['name']}")
                 print(f"   Email: {user['email']}")
                 print(f"   Phone: {user['phone']}")

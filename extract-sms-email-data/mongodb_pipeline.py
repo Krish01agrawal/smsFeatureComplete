@@ -32,10 +32,17 @@ class JSONEncoder(json.JSONEncoder):
     """Custom JSON encoder to handle MongoDB ObjectId and other non-serializable types"""
     def default(self, obj):
         if isinstance(obj, ObjectId):
-            return str(obj)
+            # Preserve ObjectId as a special format that can be reconstructed
+            return {"$oid": str(obj)}
         if isinstance(obj, datetime):
             return obj.isoformat()
         return super().default(obj)
+
+def decode_objectid(obj):
+    """Decode ObjectId from JSON format"""
+    if isinstance(obj, dict) and "$oid" in obj:
+        return ObjectId(obj["$oid"])
+    return obj
 
 async def run_mongodb_pipeline(user_id: str = None, limit: int = None, 
                                model: str = "qwen3:8b", batch_size: int = 5):
@@ -179,6 +186,11 @@ async def run_mongodb_pipeline(user_id: str = None, limit: int = None,
             # Verify the extracted array
             with open(temp_array, 'r', encoding='utf-8') as f:
                 financial_array = json.load(f)
+            
+            # Reconstruct ObjectIds from JSON format
+            for sms in financial_array:
+                if "user_id" in sms and isinstance(sms["user_id"], dict) and "$oid" in sms["user_id"]:
+                    sms["user_id"] = ObjectId(sms["user_id"]["$oid"])
             
             print(f"   ✅ Extracted {len(financial_array)} financial SMS to array format")
             print(f"   🎯 ONLY these {len(financial_array)} financial SMS will be processed by LLM")
