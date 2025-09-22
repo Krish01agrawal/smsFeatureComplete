@@ -169,12 +169,16 @@ class SMSMongoUploader:
         # 🚀 BULLETPROOF DUPLICATE PREVENTION: Pre-load existing SMS for this user
         print(f"🔍 Checking for existing SMS duplicates for user: {user_id}")
         existing_sms_hashes = set()
+        next_sms_index = 1  # 🚀 NEW: Track next available SMS index
+        
         try:
             # Get all existing SMS for this user from database
             existing_cursor = self.collection.find(
                 {"user_id": user_id}, 
-                {"content_hash": 1, "sender": 1, "body": 1, "date": 1}
+                {"content_hash": 1, "sender": 1, "body": 1, "date": 1, "unique_id": 1}
             )
+            
+            existing_sms_indices = set()  # Track existing SMS indices
             
             for existing_sms in existing_cursor:
                 # Try to get existing hash, or calculate it from content
@@ -185,12 +189,29 @@ class SMSMongoUploader:
                     content_for_hash = f"{existing_sms.get('sender', '')}{existing_sms.get('body', '')}{existing_sms.get('date', '')}"
                     content_hash = hashlib.sha256(content_for_hash.encode('utf-8')).hexdigest()[:16]
                     existing_sms_hashes.add(content_hash)
+                
+                # 🚀 NEW: Track existing unique_id indices to avoid collisions
+                unique_id = existing_sms.get('unique_id', '')
+                if unique_id and '_sms_' in unique_id:
+                    try:
+                        # Extract index from unique_id like "usr_abc_sms_000042"
+                        index_part = unique_id.split('_sms_')[-1]
+                        index_num = int(index_part)
+                        existing_sms_indices.add(index_num)
+                    except (ValueError, IndexError):
+                        pass  # Skip malformed unique_ids
+            
+            # Find next available index
+            if existing_sms_indices:
+                next_sms_index = max(existing_sms_indices) + 1
             
             print(f"   📊 Found {len(existing_sms_hashes)} existing SMS hashes for duplicate checking")
+            print(f"   🔢 Next available SMS index: {next_sms_index}")
             
         except Exception as e:
             print(f"⚠️  Warning: Could not load existing SMS for duplicate checking: {e}")
             existing_sms_hashes = set()
+            next_sms_index = 1
         
         for i, sms in enumerate(sms_data):
             try:
@@ -230,8 +251,9 @@ class SMSMongoUploader:
                 # Add to existing hashes to prevent duplicates within this batch
                 existing_sms_hashes.add(content_hash)
                 
-                # 🚀 FIXED: Use unique_id as the ONLY identifier (compatible with old data)
-                doc["unique_id"] = f"{user_id}_sms_{len(validated_data)+1:06d}"  # Use validated_data length for correct numbering
+                # 🚀 FIXED: Use unique_id with next available index to avoid collisions
+                doc["unique_id"] = f"{user_id}_sms_{next_sms_index:06d}"
+                next_sms_index += 1  # Increment for next SMS
                 
                 # Add processing status field (default: not processed)
                 doc["is_processed"] = False

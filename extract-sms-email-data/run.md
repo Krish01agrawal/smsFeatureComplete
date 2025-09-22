@@ -117,6 +117,10 @@ python3 run_complete_pipeline.py --input test_sms.json --phone "+91-9876543210" 
 # Creating new user with complete details:
 python3 run_complete_pipeline.py --input test_sms.json --name "John Doe" --phone "+91-9876543210" --email "john@example.com" --create-indexes
 
+
+#Add on data
+python3 run_complete_pipeline.py --input test_sms_addon.json --phone "+919878483843" --create-indexes
+
 # 📋 STEP-BY-STEP COMMANDS (MANUAL APPROACH)
 # ==========================================
 

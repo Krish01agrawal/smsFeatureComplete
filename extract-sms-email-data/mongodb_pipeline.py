@@ -37,8 +37,8 @@ class JSONEncoder(json.JSONEncoder):
             return obj.isoformat()
         return super().default(obj)
 
-def run_mongodb_pipeline(user_id: str = None, limit: int = None, 
-                        model: str = "qwen3:8b", batch_size: int = 5):
+async def run_mongodb_pipeline(user_id: str = None, limit: int = None, 
+                               model: str = "qwen3:8b", batch_size: int = 5):
     """Run complete MongoDB pipeline with true parallel processing"""
     
     print("🚀 Starting MongoDB Pipeline for LifafaV0")
@@ -49,8 +49,10 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
         print("📡 Connecting to MongoDB...")
         mongo_ops = MongoDBOperations()
         
-        # Step 2: Get SMS data from MongoDB
+        # Step 2: Get SMS data from MongoDB (check BOTH collections)
         print("📱 Retrieving SMS data from MongoDB...")
+        
+        # First, check sms_data for initial processing
         if user_id:
             sms_list = mongo_ops.get_user_sms_data(user_id, limit=limit, unprocessed_only=True)
             print(f"   User: {user_id}")
@@ -58,10 +60,22 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
             sms_list = mongo_ops.get_all_sms_data(limit=limit, unprocessed_only=True)
             print(f"   All users")
         
-        print(f"   Retrieved {len(sms_list)} unprocessed SMS")
+        print(f"   Retrieved {len(sms_list)} unprocessed SMS from sms_data")
         
-        if not sms_list:
-            print("✅ No unprocessed SMS found. Pipeline complete!")
+        # Second, check sms_fin_rawdata for LLM/rule-based processing
+        financial_raw_sms = mongo_ops.get_financial_raw_sms(user_id=user_id, unprocessed_only=True, limit=limit)
+        print(f"   Retrieved {len(financial_raw_sms)} unprocessed SMS from sms_fin_rawdata")
+        
+        # If no SMS in sms_data but there are unprocessed SMS in sms_fin_rawdata, process them directly
+        if not sms_list and financial_raw_sms:
+            print("🔄 No new SMS to filter, but found unprocessed financial SMS")
+            print("🚀 Jumping directly to LLM/rule-based processing...")
+            
+            # Process unprocessed financial SMS directly
+            await process_financial_sms_directly(financial_raw_sms, mongo_ops, model, batch_size)
+            return
+        elif not sms_list and not financial_raw_sms:
+            print("✅ No unprocessed SMS found in either collection. Pipeline complete!")
             return
         
         # Step 2.5: Filter out SMS that are already processed in sms_fin_rawdata
@@ -197,7 +211,8 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
             print(f"      - max_parallel_batches: {parallel_batches}")
             
             try:
-                asyncio.run(process_all_batches(
+                # 🚀 FIXED: Use await instead of asyncio.run() since we're already in async context
+                await process_all_batches(
                     input_path=temp_array,
                     output_path=temp_output,
                     model=model,
@@ -211,7 +226,7 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
                     enrich_mode="safe",
                     use_mongodb=True,  # FIXED: Enable MongoDB updates
                     user_id=user_id,
-                ))
+                )
                 print(f"   ✅ process_all_batches completed successfully")
             except Exception as e:
                 print(f"   ❌ process_all_batches failed: {e}")
@@ -238,6 +253,50 @@ def run_mongodb_pipeline(user_id: str = None, limit: int = None,
     finally:
         if 'mongo_ops' in locals():
             mongo_ops.close_connection()
+
+async def process_financial_sms_directly(financial_sms: List[Dict[str, Any]], mongo_ops: MongoDBOperations, model: str, batch_size: int):
+    """Process unprocessed financial SMS directly with LLM/rule-based approach"""
+    print(f"🚀 Processing {len(financial_sms)} unprocessed financial SMS...")
+    
+    # Create temporary files for processing
+    temp_input_file = "temp_financial_sms_input.json"
+    temp_output_file = "temp_financial_sms_output.json"
+    
+    try:
+        # Save financial SMS to temporary file
+        with open(temp_input_file, 'w', encoding='utf-8') as f:
+            json.dump(financial_sms, f, indent=2, cls=JSONEncoder, ensure_ascii=False)
+        
+        print(f"📁 Saved {len(financial_sms)} financial SMS to {temp_input_file}")
+        
+        # Process with main.py (LLM/rule-based)
+        print("🤖 Processing with LLM/rule-based approach...")
+        await process_all_batches(
+            input_path=temp_input_file,
+            output_path=temp_output_file,
+            model=model,
+            mode="batch",
+            batch_size=batch_size,
+            max_parallel_batches=3,
+            temperature=0.1,
+            max_tokens=2000,
+            top_p=0.9,
+            failures_path=None,
+            enrich_mode="comprehensive",
+            use_mongodb=True,
+            user_id=financial_sms[0].get('user_id') if financial_sms else None
+        )
+        
+        print("✅ Direct financial SMS processing completed!")
+        
+    except Exception as e:
+        print(f"❌ Error in direct financial SMS processing: {e}")
+    finally:
+        # Clean up temporary files
+        for temp_file in [temp_input_file, temp_output_file]:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                print(f"🗑️  Cleaned up: {temp_file}")
 
 def assign_unique_user_ids(sms_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Assign unique user IDs to SMS data if missing"""
@@ -388,12 +447,13 @@ def main():
         print(f"🤖 System will use LLM with rule-based fallback when needed")
     
     try:
-        run_mongodb_pipeline(
+        # Use asyncio to run the async pipeline
+        asyncio.run(run_mongodb_pipeline(
             user_id=args.user_id,
             limit=args.limit,
             model=args.model,
             batch_size=args.batch_size
-        )
+        ))
         return 0
     except Exception as e:
         print(f"❌ Pipeline execution failed: {e}")

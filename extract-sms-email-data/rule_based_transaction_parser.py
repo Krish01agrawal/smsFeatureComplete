@@ -73,19 +73,19 @@ class RuleBasedTransactionParser:
     def _initialize_amount_patterns(self) -> List[str]:
         """Advanced amount extraction patterns"""
         return [
-            # Standard formats
-            r"rs\.?\s*(\d+(?:,\d+)*(?:\.\d+)?)",  # Rs.1,000.00 or Rs 1000
-            r"₹\s*(\d+(?:,\d+)*(?:\.\d+)?)",      # ₹1,000.00
-            r"inr\s*(\d+(?:,\d+)*(?:\.\d+)?)",    # INR 1000
+            # Standard formats - 🚀 FIXED: Added colon support for Rs:95.00 format
+            r"rs[\.:\s]*(\d+(?:,\d+)*(?:\.\d+)?)",  # Rs.1,000.00 or Rs 1000 or Rs:95.00
+            r"₹\s*(\d+(?:,\d+)*(?:\.\d+)?)",        # ₹1,000.00
+            r"inr[\.:\s]*(\d+(?:,\d+)*(?:\.\d+)?)", # INR 1000 or INR:1000
             
-            # Context-specific patterns
-            r"(?:debited|credited|withdrawn|deposited|paid|received)\s+(?:by\s+)?(?:rs\.?\s*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
-            r"(?:amount|amt)\s+(?:of\s+)?(?:rs\.?\s*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
-            r"(?:balance|bal)\s+(?:rs\.?\s*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
+            # Context-specific patterns - 🚀 FIXED: Added colon support
+            r"(?:debited|credited|withdrawn|deposited|paid|received)\s+(?:by\s+)?(?:rs[\.:\s]*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
+            r"(?:amount|amt)\s+(?:of\s+)?(?:rs[\.:\s]*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
+            r"(?:balance|bal)\s+(?:rs[\.:\s]*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
             
             # Transaction-specific patterns
             r"(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:rs|rupees|₹)",  # 1000 Rs
-            r"(?:transfer|trf|sent|received)\s+(?:of\s+)?(?:rs\.?\s*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
+            r"(?:transfer|trf|sent|received)\s+(?:of\s+)?(?:rs[\.:\s]*|₹\s*)?(\d+(?:,\d+)*(?:\.\d+)?)",
         ]
     
     def _initialize_transaction_type_patterns(self) -> Dict[str, List[str]]:

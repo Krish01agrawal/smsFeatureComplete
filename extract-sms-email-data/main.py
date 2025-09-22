@@ -1432,7 +1432,8 @@ async def process_all_batches(input_path: str, output_path: str, model: str, mod
                             mongo_ops.mark_sms_as_processed(source_id, "failed")
                     
                     # Store transactions in MongoDB IMMEDIATELY after each batch
-                    if use_mongodb and mongo_ops and batch_results_collected:
+                    # 🚀 FIXED: Process BOTH successful and failed SMS (not just successful ones)
+                    if use_mongodb and mongo_ops and (batch_results_collected or batch_failures_collected):
                         try:
                             print(f"  🔍 DEBUG: Attempting to store {len(batch_results_collected)} transactions in MongoDB...")
                             print(f"  🔍 DEBUG: MongoDB connection status: {mongo_ops.db is not None}")
