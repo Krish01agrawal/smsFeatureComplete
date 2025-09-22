@@ -324,8 +324,9 @@ class SMSMongoUploader:
             try:
                 self.collection.create_index(
                     [("user_id", 1), ("content_hash", 1)], 
-                    unique=True,
+                    unique=True, 
                     background=True,
+                    sparse=True,  # Ignore documents where content_hash is null
                     name="unique_content_per_user_idx"
                 )
                 print("🔒 Created bulletproof duplicate prevention index on (user_id + content_hash)")
