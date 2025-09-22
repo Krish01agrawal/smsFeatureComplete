@@ -62,16 +62,28 @@ def run_command(cmd: list, description: str, check_success: bool = True) -> Dict
         return {"success": False, "error": str(e)}
 
 def extract_user_id_from_output(output: str) -> Optional[str]:
-    """Extract user_id from command output"""
+    """Extract user_id from command output (handles both ObjectId and custom format)"""
     lines = output.split('\n')
     for line in lines:
         if 'user_id:' in line.lower() or 'user id:' in line.lower():
-            # Try to extract user_id pattern
+            # Try to extract ObjectId pattern first (24 hex characters)
             import re
-            pattern = r'usr_[a-f0-9_]+'
-            match = re.search(pattern, line)
-            if match:
-                return match.group(0)
+            objectid_pattern = r'ObjectId\([\'"]([a-f0-9]{24})[\'"]\)'
+            objectid_match = re.search(objectid_pattern, line)
+            if objectid_match:
+                return objectid_match.group(1)
+            
+            # Try to extract custom user_id pattern (backward compatibility)
+            custom_pattern = r'usr_[a-f0-9_]+'
+            custom_match = re.search(custom_pattern, line)
+            if custom_match:
+                return custom_match.group(0)
+            
+            # Try to extract plain ObjectId (24 hex characters)
+            plain_objectid_pattern = r'[a-f0-9]{24}'
+            plain_match = re.search(plain_objectid_pattern, line)
+            if plain_match and len(plain_match.group(0)) == 24:
+                return plain_match.group(0)
     return None
 
 def main():

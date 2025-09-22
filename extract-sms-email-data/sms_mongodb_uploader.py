@@ -144,13 +144,27 @@ class SMSMongoUploader:
                     print(f"❌ Failed to create user:")
                     for error in user_result["errors"]:
                         print(f"   - {error}")
-                    # Fallback to timestamp-based ID
-                    user_id = f"fallback_user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                    print(f"   🔄 Using fallback user_id: {user_id}")
+                    # Fallback to ObjectId-based ID to maintain consistency
+                    from bson import ObjectId
+                    user_id = ObjectId()
+                    print(f"   🔄 Using fallback ObjectId user_id: {user_id}")
             else:
                 # Fallback when user manager is not available
-                user_id = f"legacy_user_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                print(f"   ⚠️  User manager not available, using fallback: {user_id}")
+                from bson import ObjectId
+                user_id = ObjectId()
+                print(f"   ⚠️  User manager not available, using fallback ObjectId: {user_id}")
+        
+        # 🚀 CONVERT STRING USER_ID TO OBJECTID IF VALID
+        from bson import ObjectId
+        
+        if user_id and isinstance(user_id, str):
+            try:
+                # Try to convert string to ObjectId
+                user_id = ObjectId(user_id)
+                print(f"   🆔 Converted user_id to ObjectId: {user_id}")
+            except:
+                # If conversion fails, keep as string (backward compatibility)
+                print(f"   🆔 Using string user_id: {user_id}")
         
         print(f"   🆔 Final user_id: {user_id}")
         

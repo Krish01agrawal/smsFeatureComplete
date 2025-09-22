@@ -259,8 +259,18 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
     task_id = f"sms_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{request.user_id[:8]}"
     
     try:
-        # Validate user exists
-        user = users_collection.find_one({"user_id": request.user_id})
+        # Validate user exists (handle both ObjectId and string user_id)
+        from bson import ObjectId
+        
+        user = None
+        try:
+            # Try ObjectId lookup first
+            user_id_obj = ObjectId(request.user_id)
+            user = users_collection.find_one({"_id": user_id_obj})
+        except:
+            # Fallback to string user_id lookup (backward compatibility)
+            user = users_collection.find_one({"user_id": request.user_id})
+        
         if not user:
             raise HTTPException(
                 status_code=404,
@@ -291,8 +301,13 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
             pass  # Ignore cleanup errors
         
         if result["success"]:
-            # Get processing statistics
-            user_stats = users_collection.find_one({"user_id": request.user_id})
+            # Get processing statistics (handle both ObjectId and string user_id)
+            user_stats = None
+            try:
+                user_id_obj = ObjectId(request.user_id)
+                user_stats = users_collection.find_one({"_id": user_id_obj})
+            except:
+                user_stats = users_collection.find_one({"user_id": request.user_id})
             
             return {
                 "status": "success",
@@ -366,14 +381,22 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
             start_date, end_date = get_date_range('last_month')
             period_str = "last_month_default"
         
-        # Query transactions
+        # Query transactions (handle both ObjectId and string user_id)
+        from bson import ObjectId
+        
         query = {
-            "user_id": request.user_id,
             "transaction_date": {
                 "$gte": start_date,
                 "$lte": end_date
             }
         }
+        
+        # Try ObjectId first, fallback to string
+        try:
+            user_id_obj = ObjectId(request.user_id)
+            query["user_id"] = user_id_obj
+        except:
+            query["user_id"] = request.user_id
         
         transactions = list(user_financial_transactions_collection.find(query))
         
