@@ -35,8 +35,8 @@ except ImportError:
     sys.exit(1)
 
 # MongoDB Configuration
-MONGODB_URI = "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-DATABASE_NAME = "pluto_money"
+MONGODB_URI = "mongodb+srv://dev:fXt3BsN6IffLtXu7@blackcard-dev.7tofd5j.mongodb.net/blackcard"
+DATABASE_NAME = "blackcard"
 COLLECTION_NAME = "sms_data"
 
 class SMSMongoUploader:
@@ -578,7 +578,7 @@ def main():
                 print(f"   Total SMS Uploaded: {stats.get('total_uploaded', 0):,}")
                 print(f"   Total SMS Processed: {stats.get('total_processed', 0):,}")
                 print(f"   Total Financial SMS: {stats.get('total_financial', 0):,}")
-                print(f"   User Created: {user_doc.get('created_at', 'N/A')}")
+                print(f"   User Created: {user_doc.get('createdAt', 'N/A')}")
                 print(f"   Last Upload: {stats.get('last_upload', 'N/A')}")
         
         # Show final stats

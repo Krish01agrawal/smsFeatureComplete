@@ -29,10 +29,10 @@ class MongoDBOperations:
         """Initialize MongoDB connection with connection pooling and retry mechanism"""
         # Use environment variable or default
         if connection_string is None:
-            connection_string = os.getenv('MONGODB_URI', 'mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0')
+            connection_string = os.getenv('MONGODB_URI', 'mongodb+srv://dev:fXt3BsN6IffLtXu7@blackcard-dev.7tofd5j.mongodb.net/blackcard')
         
         if db_name is None:
-            db_name = os.getenv('MONGODB_DB', 'pluto_money')
+            db_name = os.getenv('MONGODB_DB', 'blackcard')
         
         self.connection_string = connection_string
         self.db_name = db_name
@@ -255,10 +255,10 @@ class MongoDBOperations:
                     del sms['is_processed']
                     logger.debug(f"🗑️  Removed 'is_processed' field from SMS {sms.get('unique_id', 'NO_ID')}")
                 
-                if 'created_at' not in sms:
-                    sms['created_at'] = datetime.now()
-                if 'updated_at' not in sms:
-                    sms['updated_at'] = datetime.now()
+                if 'createdAt' not in sms:
+                    sms['createdAt'] = datetime.now()
+                if 'updatedAt' not in sms:
+                    sms['updatedAt'] = datetime.now()
                 
                 logger.debug(f"✅ Prepared SMS {i+1}: {sms.get('unique_id', 'NO_ID')} for storage")
             
@@ -424,7 +424,7 @@ class MongoDBOperations:
                 "isprocessed": True,
                 "processing_timestamp": datetime.now(),
                 "processing_status": status,
-                "updated_at": datetime.now()
+                "updatedAt": datetime.now()
             }
             
             # 🚀 FIXED: PRIORITIZE EXACT FULL unique_id MATCH FIRST
@@ -521,8 +521,8 @@ class MongoDBOperations:
         """Store a single financial transaction"""
         try:
             # Add metadata
-            transaction_data["created_at"] = datetime.now()
-            transaction_data["updated_at"] = datetime.now()
+            transaction_data["createdAt"] = datetime.now()
+            transaction_data["updatedAt"] = datetime.now()
             
             # 🚀 FIXED: Use unique_id for uniqueness
             if "unique_id" in transaction_data:
@@ -572,8 +572,8 @@ class MongoDBOperations:
             
             # Add metadata to each transaction
             for i, transaction in enumerate(transactions):
-                transaction["created_at"] = datetime.now()
-                transaction["updated_at"] = datetime.now()
+                transaction["createdAt"] = datetime.now()
+                transaction["updatedAt"] = datetime.now()
                 logger.debug(f"🔍 DEBUG: Prepared transaction {i+1}: {transaction.get('unique_id', 'NO_ID')}")
             
             # Use bulk operations for better performance
@@ -988,8 +988,8 @@ class MongoDBOperations:
                 "transaction_type": "unknown",
                 "message_intent": "unknown",
                 "currency": "INR",
-                "created_at": datetime.now(),
-                "updated_at": datetime.now(),
+                "createdAt": datetime.now(),
+                "updatedAt": datetime.now(),
                 "recovery_source": "sms_reconstruction",
                 "recovery_timestamp": datetime.now()
             }
