@@ -1,12 +1,3 @@
-user_sms.json (sms_data)   -->      user_financial.json
-
-user_financial.json     -->         structured_user_finData.json (sms_fin_rawdata)
-
-batch_processing sms to llm -> financial_transactions
-
-String Date (financial_transactions)  -->   BSON date (user_financial_transactions) 
-
-
 
 1. test_sms.json → sms_mongodb_uploader.py → sms_data (MongoDB)
 2. sms_data → mongodb_pipeline.py → sms_financial_filter.py → financial SMS
@@ -36,22 +27,6 @@ python3 main.py --input test_realtime.json --output test_results_realtime.json -
 
 
 cd extract-sms-email-data/
-
-
-
-
-# 🎯 ENTERPRISE USER MANAGEMENT SYSTEM
-# =====================================
-
-# Option 1: Create user manually first (recommended for production)
-python3 user_manager.py --create --name "Divyam Verma" --email "divyam@example.com" --phone "+91-9876543210"
-# Output: User ID: usr_a1b2c3d4_20250921_102030_f47ac10b
-
-# Option 2: Auto-create user during SMS upload (quick start)
-python3 sms_mongodb_uploader.py --input test_sms.json --user-name "Divyam Verma" --user-email "divyam@example.com" --user-phone "+91-9876543210" --create-indexes --user-stats
-
-# Option 3: Use existing user ID
-python3 sms_mongodb_uploader.py --input test_sms.json --user-id "usr_0f55bfcd_20250921_173053_85d85715" --create-indexes --stats
 
 
 
@@ -120,6 +95,10 @@ python3 run_complete_pipeline.py --input test_sms.json --name "John Doe" --phone
 
 #Add on data
 python3 run_complete_pipeline.py --input test_sms_addon.json --phone "+919878483843" --create-indexes
+
+
+
+
 
 # 📋 STEP-BY-STEP COMMANDS (MANUAL APPROACH)
 # ==========================================

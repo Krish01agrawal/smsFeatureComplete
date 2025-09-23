@@ -1,0 +1,102 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: sms-mongodb-dev
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: pluto_money
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_dev_data:/data/db
+    networks:
+      - sms-dev-network
+
+  # SMS Processing Service (Development)
+  sms-processing-dev:
+    build:
+      context: ./extract-sms-email-data
+      dockerfile: Dockerfile
+    container_name: sms-processing-dev
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/pluto_money?authSource=admin
+      MONGODB_DB: pluto_money
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongodb
+    networks:
+      - sms-dev-network
+    volumes:
+      - ./extract-sms-email-data:/app
+      - ./extract-sms-email-data/logs:/app/logs
+    command: ["uvicorn", "api_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # Analytics Dashboard Service (Development)
+  analytics-dashboard-dev:
+    build:
+      context: ./sms
+      dockerfile: Dockerfile
+    container_name: sms-analytics-dev
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/pluto_money?authSource=admin
+      MONGODB_DB: pluto_money
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      DEBUG: True
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8501:8501"
+    depends_on:
+      - mongodb
+      - sms-processing-dev
+    networks:
+      - sms-dev-network
+    volumes:
+      - ./sms:/app
+      - ./sms/logs:/app/logs
+    command: ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.runOnSave=true"]
+
+  # Financial Chat API Service (Development)
+  chat-api-dev:
+    build:
+      context: ./sms
+      dockerfile: Dockerfile.chat
+    container_name: sms-chat-api-dev
+    restart: unless-stopped
+    environment:
+      MONGODB_URI: mongodb://admin:password@mongodb:27017/pluto_money?authSource=admin
+      MONGODB_DB: pluto_money
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      DEBUG: True
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8001:8001"
+    depends_on:
+      - mongodb
+      - sms-processing-dev
+    networks:
+      - sms-dev-network
+    volumes:
+      - ./sms:/app
+      - ./sms/logs:/app/logs
+    command: ["python", "run_production_api.py"]
+
+volumes:
+  mongodb_dev_data:
+    driver: local
+
+networks:
+  sms-dev-network:
+    driver: bridge
