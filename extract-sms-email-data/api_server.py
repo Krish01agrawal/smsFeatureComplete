@@ -1,190 +1,179 @@
 #!/usr/bin/env python3
 """
-SMS Financial Processing & Analytics API
-=======================================
+Modified API Server - No Users Collection Dependency
+===================================================
 
-FastAPI server providing:
-1. SMS Processing Pipeline API
-2. Financial Analytics & Insights API
-3. Transaction Data Management API
+This version removes the dependency on the users collection and works with
+your custom user format where _id is the user_id.
 
-Built on top of the SMS processing pipeline system.
+Key Changes:
+1. Removes user validation from users collection
+2. Uses provided user_id directly
+3. Removes user statistics tracking
+4. Works with your custom user format
 """
 
 import os
-import sys
 import json
-import asyncio
 import tempfile
+import asyncio
 import subprocess
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union
-from pathlib import Path
-
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Path as PathParam
+from typing import List, Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, validator
 from pymongo import MongoClient
 from bson import ObjectId
-import pandas as pd
+import logging
 from dotenv import load_dotenv
+import json
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
-# Initialize FastAPI app
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Custom JSON encoder to handle ObjectId
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
+def convert_objectid_to_str(data):
+    """Convert ObjectId fields to strings for JSON serialization"""
+    if isinstance(data, dict):
+        return {key: convert_objectid_to_str(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [convert_objectid_to_str(item) for item in data]
+    elif isinstance(data, ObjectId):
+        return str(data)
+    else:
+        return data
+
+# MongoDB connection - Use environment variable or default to local
+# You can set MONGODB_URI in .env file or environment variable
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/pluto_money")
+MONGODB_DB = os.getenv("MONGODB_DB", "pluto_money")
+
+print(f"🔗 Using MongoDB URI: {MONGODB_URI}")
+
+try:
+    client = MongoClient(
+        MONGODB_URI,
+        tlsAllowInvalidCertificates=True,
+        serverSelectionTimeoutMS=10000,
+        connectTimeoutMS=10000,
+        socketTimeoutMS=10000
+    )
+    db = client[MONGODB_DB]
+    # Test connection
+    db.command('ping')
+    print("✅ MongoDB connected successfully")
+except Exception as e:
+    print(f"❌ MongoDB connection failed: {e}")
+    print("🔄 Please check your MongoDB connection and .env file")
+    client = None
+    db = None
+
+# Collections (NO USERS COLLECTION NEEDED)
+if db is not None:
+    sms_data_collection = db["sms_data"]
+    sms_fin_rawdata_collection = db["sms_fin_rawdata"]
+    financial_transactions_collection = db["financial_transactions"]
+    user_financial_transactions_collection = db["user_financial_transactions"]
+else:
+    # Mock collections for development when MongoDB is not available
+    sms_data_collection = None
+    sms_fin_rawdata_collection = None
+    financial_transactions_collection = None
+    user_financial_transactions_collection = None
+
 app = FastAPI(
     title="SMS Financial Processing & Analytics API",
-    description="Complete SMS processing pipeline with financial analytics",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    description="Process SMS data and provide financial analytics without users collection dependency",
+    version="1.0.0"
 )
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Configure as needed for production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# MongoDB connection
-MONGODB_URI = os.getenv('MONGODB_URI')
-MONGODB_DB = os.getenv('MONGODB_DB', 'pluto_money')
-
-if not MONGODB_URI:
-    raise ValueError("MONGODB_URI environment variable is required")
-
-# Global MongoDB client
-mongo_client = MongoClient(MONGODB_URI, tlsAllowInvalidCertificates=True)
-db = mongo_client[MONGODB_DB]
-
-# Collections
-users_collection = db['users']
-sms_data_collection = db['sms_data']
-financial_transactions_collection = db['financial_transactions']
-user_financial_transactions_collection = db['user_financial_transactions']
 
 # Pydantic Models
-class SMSMessage(BaseModel):
-    """Individual SMS message model"""
-    sender: str = Field(..., description="SMS sender ID")
-    body: str = Field(..., description="SMS message content")
-    date: str = Field(..., description="SMS timestamp (ISO format)")
-    type: str = Field(default="SmsMessageKind.received", description="SMS type")
+class SMSData(BaseModel):
+    sender: str
+    body: str
+    date: str
+    type: str
 
 class SMSProcessingRequest(BaseModel):
-    """Request model for SMS processing endpoint"""
-    user_id: str = Field(..., description="User ID for processing")
-    sms_data: List[SMSMessage] = Field(..., description="List of SMS messages to process")
-    batch_size: int = Field(default=5, ge=1, le=20, description="Processing batch size")
-    model: str = Field(default="qwen3:8b", description="LLM model to use")
-    create_indexes: bool = Field(default=False, description="Create database indexes")
-    skip_date_conversion: bool = Field(default=False, description="Skip final date conversion")
-
-    @validator('sms_data')
-    def validate_sms_data(cls, v):
-        if not v or len(v) == 0:
-            raise ValueError("sms_data cannot be empty")
-        return v
+    user_id: str
+    sms_data: List[SMSData]
+    batch_size: int = Field(default=5, ge=1, le=50)
+    model: str = Field(default="qwen3:8b")
+    create_indexes: bool = Field(default=True)
+    skip_date_conversion: bool = Field(default=False)
 
 class FinancialAnalyticsRequest(BaseModel):
-    """Request model for financial analytics"""
-    user_id: str = Field(..., description="User ID for analytics")
-    start_date: Optional[str] = Field(None, description="Start date (ISO format)")
-    end_date: Optional[str] = Field(None, description="End date (ISO format)")
-    period: Optional[str] = Field(None, description="Predefined period: last_week, last_month, last_3_months, last_5_months, last_6_months, last_year")
-
+    user_id: str
+    period: str = Field(..., pattern="^(last_week|last_month|last_3_months|last_5_months|last_6_months|last_year)$")
+    
     @validator('period')
     def validate_period(cls, v):
-        if v and v not in ['last_week', 'last_month', 'last_3_months', 'last_5_months', 'last_6_months', 'last_year']:
-            raise ValueError("Invalid period. Use: last_week, last_month, last_3_months, last_5_months, last_6_months, last_year")
+        valid_periods = ["last_week", "last_month", "last_3_months", "last_5_months", "last_6_months", "last_year"]
+        if v not in valid_periods:
+            raise ValueError(f"Invalid period. Use: {', '.join(valid_periods)}")
         return v
 
-class ProcessingStatus(BaseModel):
-    """Processing status response model"""
-    status: str
-    message: str
-    user_id: str
-    task_id: str
-    started_at: datetime
-    estimated_completion: Optional[datetime] = None
-
-class FinancialSummary(BaseModel):
-    """Financial summary response model"""
-    user_id: str
-    period: str
-    start_date: datetime
-    end_date: datetime
-    total_income: float
-    total_expense: float
-    net_amount: float
-    transaction_count: int
-    income_transactions: int
-    expense_transactions: int
-    top_categories: List[Dict[str, Any]]
-    monthly_breakdown: List[Dict[str, Any]]
-
 # Utility Functions
-def get_date_range(period: str) -> tuple[datetime, datetime]:
-    """Get date range based on period"""
-    end_date = datetime.now()
+def get_date_range(period: str) -> tuple:
+    """Get start and end dates for the given period"""
+    now = datetime.now()
     
-    if period == 'last_week':
-        start_date = end_date - timedelta(weeks=1)
-    elif period == 'last_month':
-        start_date = end_date - timedelta(days=30)
-    elif period == 'last_3_months':
-        start_date = end_date - timedelta(days=90)
-    elif period == 'last_5_months':
-        start_date = end_date - timedelta(days=150)
-    elif period == 'last_6_months':
-        start_date = end_date - timedelta(days=180)
-    elif period == 'last_year':
-        start_date = end_date - timedelta(days=365)
+    if period == "last_week":
+        start_date = now - timedelta(days=7)
+    elif period == "last_month":
+        start_date = now - timedelta(days=30)
+    elif period == "last_3_months":
+        start_date = now - timedelta(days=90)
+    elif period == "last_5_months":
+        start_date = now - timedelta(days=150)
+    elif period == "last_6_months":
+        start_date = now - timedelta(days=180)
+    elif period == "last_year":
+        start_date = now - timedelta(days=365)
     else:
-        raise ValueError(f"Invalid period: {period}")
+        start_date = now - timedelta(days=30)
     
-    return start_date, end_date
+    return start_date, now
 
-def parse_iso_date(date_str: str) -> datetime:
-    """Parse ISO date string to datetime"""
-    try:
-        return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-    except ValueError:
-        try:
-            return datetime.strptime(date_str, '%Y-%m-%d')
-        except ValueError:
-            raise ValueError(f"Invalid date format: {date_str}")
-
-async def run_pipeline_async(user_id: str, user_phone: str, sms_file_path: str, batch_size: int, model: str, 
+async def run_pipeline_async(user_id: str, sms_file_path: str, batch_size: int, model: str, 
                            create_indexes: bool, skip_date_conversion: bool) -> Dict[str, Any]:
     """Run the complete SMS processing pipeline asynchronously"""
-    
-    cmd = [
-        "python3", "run_complete_pipeline.py",
-        "--input", sms_file_path,
-        "--phone", user_phone,
-        "--batch-size", str(batch_size),
-        "--model", model
-    ]
-    
-    if create_indexes:
-        cmd.append("--create-indexes")
-    
-    if skip_date_conversion:
-        cmd.append("--skip-date-conversion")
-    
     try:
-        # Run the pipeline
+        cmd = [
+            "python3", "run_complete_pipeline.py",
+            "--input", sms_file_path,
+            "--user-id", user_id,  # Use user_id directly
+            "--batch-size", str(batch_size),
+            "--model", model
+        ]
+        
+        if create_indexes:
+            cmd.append("--create-indexes")
+        
+        if skip_date_conversion:
+            cmd.append("--skip-date-conversion")
+        
+        logger.info(f"Running pipeline command: {' '.join(cmd)}")
+        
+        # Get the directory where the API server is located (where pipeline scripts are)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=os.path.dirname(os.path.abspath(__file__))
+            cwd=script_dir
         )
         
         stdout, stderr = await process.communicate()
@@ -192,11 +181,12 @@ async def run_pipeline_async(user_id: str, user_phone: str, sms_file_path: str, 
         return {
             "success": process.returncode == 0,
             "returncode": process.returncode,
-            "stdout": stdout.decode('utf-8'),
-            "stderr": stderr.decode('utf-8')
+            "stdout": stdout.decode() if stdout else "",
+            "stderr": stderr.decode() if stderr else ""
         }
         
     except Exception as e:
+        logger.error(f"Pipeline execution error: {e}")
         return {
             "success": False,
             "error": str(e),
@@ -204,12 +194,11 @@ async def run_pipeline_async(user_id: str, user_phone: str, sms_file_path: str, 
         }
 
 # API Endpoints
-
 @app.get("/")
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "SMS Financial Processing & Analytics API",
+        "message": "SMS Financial Processing & Analytics API (No Users Collection)",
         "version": "1.0.0",
         "endpoints": {
             "docs": "/docs",
@@ -224,14 +213,23 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     try:
-        # Test MongoDB connection
-        db.command('ping')
-        return {
-            "status": "healthy",
-            "timestamp": datetime.now(),
-            "database": "connected",
-            "version": "1.0.0"
-        }
+        if db is not None:
+            # Test MongoDB connection
+            db.command('ping')
+            return {
+                "status": "healthy",
+                "timestamp": datetime.now(),
+                "database": "connected",
+                "version": "1.0.0"
+            }
+        else:
+            return {
+                "status": "degraded",
+                "timestamp": datetime.now(),
+                "database": "disconnected",
+                "version": "1.0.0",
+                "message": "Running in development mode without MongoDB"
+            }
     except Exception as e:
         return JSONResponse(
             status_code=503,
@@ -253,31 +251,22 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
     2. Creates a temporary file with the SMS data
     3. Runs the complete processing pipeline
     4. Returns processing status and results
+    
+    NO USERS COLLECTION VALIDATION - Uses provided user_id directly
     """
     
     # Generate task ID
     task_id = f"sms_process_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{request.user_id[:8]}"
     
     try:
-        # Validate user exists (handle both ObjectId and string user_id)
-        from bson import ObjectId
+        # NO USER VALIDATION - Use provided user_id directly
+        logger.info(f"Processing SMS for user_id: {request.user_id}")
         
-        user = None
-        user_id_obj = None
-        try:
-            # Try ObjectId lookup first
-            user_id_obj = ObjectId(request.user_id)
-            user = users_collection.find_one({"_id": user_id_obj})
-        except:
-            # Fallback to string user_id lookup (backward compatibility)
-            user = users_collection.find_one({"user_id": request.user_id})
-            if user and user.get("_id"):
-                user_id_obj = user["_id"]
-        
-        if not user:
+        # Check if MongoDB is available
+        if db is None:
             raise HTTPException(
-                status_code=404,
-                detail=f"User not found: {request.user_id}"
+                status_code=503,
+                detail="MongoDB connection not available. Please check your database connection."
             )
         
         # Create temporary file with SMS data
@@ -287,17 +276,9 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
             json.dump(sms_data_list, temp_file, indent=2)
             temp_file_path = temp_file.name
         
-        # Run pipeline asynchronously using phone number for better user identification
-        user_phone = user.get("phone") if user else None
-        if not user_phone:
-            raise HTTPException(
-                status_code=400,
-                detail="User phone number not found - required for SMS processing"
-            )
-        
+        # Run pipeline asynchronously using user_id directly
         result = await run_pipeline_async(
-            user_id=str(user_id_obj) if user_id_obj else request.user_id,
-            user_phone=user_phone,
+            user_id=request.user_id,
             sms_file_path=temp_file_path,
             batch_size=request.batch_size,
             model=request.model,
@@ -312,13 +293,21 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
             pass  # Ignore cleanup errors
         
         if result["success"]:
-            # Get processing statistics (handle both ObjectId and string user_id)
-            user_stats = None
-            try:
-                user_id_obj = ObjectId(request.user_id)
-                user_stats = users_collection.find_one({"_id": user_id_obj})
-            except:
-                user_stats = users_collection.find_one({"user_id": request.user_id})
+            # Get processing statistics from actual collections
+            if sms_data_collection is not None and financial_transactions_collection is not None:
+                total_uploaded = sms_data_collection.count_documents({"user_id": ObjectId(request.user_id)})
+                total_processed = sms_data_collection.count_documents({
+                    "user_id": ObjectId(request.user_id),
+                    "is_processed": True
+                })
+                total_financial = financial_transactions_collection.count_documents({
+                    "user_id": ObjectId(request.user_id)
+                })
+            else:
+                # Fallback when MongoDB is not available
+                total_uploaded = len(request.sms_data)
+                total_processed = len(request.sms_data)
+                total_financial = 0
             
             return {
                 "status": "success",
@@ -328,11 +317,11 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
                 "processed_at": datetime.now(),
                 "statistics": {
                     "input_sms_count": len(request.sms_data),
-                    "total_uploaded": user_stats.get("sms_stats", {}).get("total_uploaded", 0),
-                    "total_processed": user_stats.get("sms_stats", {}).get("total_processed", 0),
-                    "total_financial": user_stats.get("sms_stats", {}).get("total_financial", 0)
+                    "total_uploaded": total_uploaded,
+                    "total_processed": total_processed,
+                    "total_financial": total_financial
                 },
-                "pipeline_output": result["stdout"][-1000:] if result["stdout"] else ""  # Last 1000 chars
+                "pipeline_output": result["stdout"][-1000:] if result["stdout"] else ""
             }
         else:
             raise HTTPException(
@@ -348,287 +337,137 @@ async def process_sms_data(request: SMSProcessingRequest, background_tasks: Back
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Unexpected error in process_sms_data: {e}")
         raise HTTPException(
             status_code=500,
-            detail={
-                "message": "Internal server error during SMS processing",
-                "task_id": task_id,
-                "error": str(e)
-            }
+            detail=f"Internal server error: {str(e)}"
         )
 
 @app.post("/api/v1/analytics/financial")
 async def get_financial_analytics(request: FinancialAnalyticsRequest):
-    """
-    Get comprehensive financial analytics for a user
-    
-    Provides:
-    - Total income and expenses
-    - Net amount (income - expenses)
-    - Transaction counts and breakdowns
-    - Category analysis
-    - Monthly trends
-    """
-    
+    """Get comprehensive financial analytics for a user"""
     try:
-        # Validate user exists (handle both ObjectId and string user_id)
-        from bson import ObjectId
+        start_date, end_date = get_date_range(request.period)
         
-        user = None
-        user_id_obj = None
-        try:
-            # Try ObjectId lookup first
-            user_id_obj = ObjectId(request.user_id)
-            user = users_collection.find_one({"_id": user_id_obj})
-        except:
-            # Fallback to string user_id lookup (backward compatibility)
-            user = users_collection.find_one({"user_id": request.user_id})
-            if user and user.get("_id"):
-                user_id_obj = user["_id"]
+        # Convert user_id to ObjectId
+        user_id_obj = ObjectId(request.user_id)
         
-        if not user:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User not found: {request.user_id}"
-            )
-        
-        # Determine date range
-        if request.period:
-            start_date, end_date = get_date_range(request.period)
-            period_str = request.period
-        elif request.start_date and request.end_date:
-            start_date = parse_iso_date(request.start_date)
-            end_date = parse_iso_date(request.end_date)
-            period_str = f"custom_{request.start_date}_to_{request.end_date}"
-        else:
-            # Default to last month
-            start_date, end_date = get_date_range('last_month')
-            period_str = "last_month_default"
-        
-        # Query transactions using the resolved user_id_obj
+        # Query financial transactions
         query = {
+            "user_id": user_id_obj,
             "transaction_date": {
                 "$gte": start_date,
                 "$lte": end_date
             }
         }
         
-        # Use the resolved user_id_obj or fallback to string
-        if user_id_obj:
-            query["user_id"] = user_id_obj
-        else:
-            query["user_id"] = request.user_id
-        
         transactions = list(user_financial_transactions_collection.find(query))
         
-        if not transactions:
-            return FinancialSummary(
-                user_id=request.user_id,
-                period=period_str,
-                start_date=start_date,
-                end_date=end_date,
-                total_income=0.0,
-                total_expense=0.0,
-                net_amount=0.0,
-                transaction_count=0,
-                income_transactions=0,
-                expense_transactions=0,
-                top_categories=[],
-                monthly_breakdown=[]
-            )
-        
-        # Convert to DataFrame for analysis
-        df = pd.DataFrame(transactions)
-        
-        # Calculate basic metrics
-        income_df = df[df['transaction_type'] == 'credit']
-        expense_df = df[df['transaction_type'] == 'debit']
-        
-        total_income = float(income_df['amount'].sum()) if not income_df.empty else 0.0
-        total_expense = float(expense_df['amount'].sum()) if not expense_df.empty else 0.0
+        # Calculate analytics
+        total_income = sum(t.get("amount", 0) for t in transactions if t.get("transaction_type") == "credit")
+        total_expense = sum(t.get("amount", 0) for t in transactions if t.get("transaction_type") == "debit")
         net_amount = total_income - total_expense
         
-        # Category analysis
-        category_analysis = df.groupby('category').agg({
-            'amount': ['sum', 'count'],
-            'transaction_type': 'first'
-        }).reset_index()
+        income_transactions = [t for t in transactions if t.get("transaction_type") == "credit"]
+        expense_transactions = [t for t in transactions if t.get("transaction_type") == "debit"]
         
-        category_analysis.columns = ['category', 'total_amount', 'count', 'type']
-        top_categories = category_analysis.nlargest(5, 'total_amount').to_dict('records')
+        return {
+            "user_id": request.user_id,
+            "period": request.period,
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_income": total_income,
+            "total_expense": total_expense,
+            "net_amount": net_amount,
+            "transaction_count": len(transactions),
+            "income_transactions": len(income_transactions),
+            "expense_transactions": len(expense_transactions)
+        }
         
-        # Monthly breakdown
-        df['month'] = pd.to_datetime(df['transaction_date']).dt.to_period('M')
-        monthly_stats = df.groupby(['month', 'transaction_type'])['amount'].sum().unstack(fill_value=0)
-        
-        monthly_breakdown = []
-        for month in monthly_stats.index:
-            monthly_breakdown.append({
-                "month": str(month),
-                "income": float(monthly_stats.loc[month].get('credit', 0)),
-                "expense": float(monthly_stats.loc[month].get('debit', 0)),
-                "net": float(monthly_stats.loc[month].get('credit', 0) - monthly_stats.loc[month].get('debit', 0))
-            })
-        
-        return FinancialSummary(
-            user_id=request.user_id,
-            period=period_str,
-            start_date=start_date,
-            end_date=end_date,
-            total_income=total_income,
-            total_expense=total_expense,
-            net_amount=net_amount,
-            transaction_count=len(transactions),
-            income_transactions=len(income_df),
-            expense_transactions=len(expense_df),
-            top_categories=top_categories,
-            monthly_breakdown=monthly_breakdown
-        )
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Error generating financial analytics",
-                "error": str(e)
-            }
-        )
+        logger.error(f"Error in financial analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/analytics/income/{user_id}")
-async def get_income_analytics(
-    user_id: str = PathParam(..., description="User ID"),
-    period: str = Query(default="last_month", description="Time period"),
-    start_date: Optional[str] = Query(None, description="Custom start date (ISO format)"),
-    end_date: Optional[str] = Query(None, description="Custom end date (ISO format)")
-):
-    """
-    Get detailed income analytics for a user
-    
-    Returns:
-    - Total credited amount
-    - Income sources breakdown
-    - Trends over time
-    """
-    
-    request = FinancialAnalyticsRequest(
-        user_id=user_id,
-        period=period if not start_date else None,
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    analytics = await get_financial_analytics(request)
-    
-    # Extract income-specific data
-    return {
-        "user_id": user_id,
-        "period": analytics.period,
-        "date_range": {
-            "start": analytics.start_date,
-            "end": analytics.end_date
-        },
-        "total_income": analytics.total_income,
-        "income_transactions": analytics.income_transactions,
-        "average_income_per_transaction": analytics.total_income / max(analytics.income_transactions, 1),
-        "top_income_categories": [cat for cat in analytics.top_categories if cat.get('type') == 'credit'],
-        "monthly_income_trend": [
-            {"month": month["month"], "income": month["income"]} 
-            for month in analytics.monthly_breakdown
-        ]
-    }
+async def get_income_analytics(user_id: str, period: str = "last_month"):
+    """Get income analytics for a user"""
+    try:
+        start_date, end_date = get_date_range(period)
+        user_id_obj = ObjectId(user_id)
+        
+        query = {
+            "user_id": user_id_obj,
+            "transaction_type": "credit",
+            "transaction_date": {
+                "$gte": start_date,
+                "$lte": end_date
+            }
+        }
+        
+        transactions = list(user_financial_transactions_collection.find(query))
+        total_income = sum(t.get("amount", 0) for t in transactions)
+        
+        # Convert ObjectId fields to strings for JSON serialization
+        transactions_serialized = convert_objectid_to_str(transactions)
+        
+        return {
+            "user_id": user_id,
+            "period": period,
+            "total_income": total_income,
+            "transaction_count": len(transactions),
+            "transactions": transactions_serialized
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in income analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/analytics/expenses/{user_id}")
-async def get_expense_analytics(
-    user_id: str = PathParam(..., description="User ID"),
-    period: str = Query(default="last_month", description="Time period"),
-    start_date: Optional[str] = Query(None, description="Custom start date (ISO format)"),
-    end_date: Optional[str] = Query(None, description="Custom end date (ISO format)")
-):
-    """
-    Get detailed expense analytics for a user
-    
-    Returns:
-    - Total debited amount
-    - Expense categories breakdown
-    - Spending patterns
-    """
-    
-    request = FinancialAnalyticsRequest(
-        user_id=user_id,
-        period=period if not start_date else None,
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    analytics = await get_financial_analytics(request)
-    
-    # Extract expense-specific data
-    return {
-        "user_id": user_id,
-        "period": analytics.period,
-        "date_range": {
-            "start": analytics.start_date,
-            "end": analytics.end_date
-        },
-        "total_expenses": analytics.total_expense,
-        "expense_transactions": analytics.expense_transactions,
-        "average_expense_per_transaction": analytics.total_expense / max(analytics.expense_transactions, 1),
-        "top_expense_categories": [cat for cat in analytics.top_categories if cat.get('type') == 'debit'],
-        "monthly_expense_trend": [
-            {"month": month["month"], "expenses": month["expense"]} 
-            for month in analytics.monthly_breakdown
-        ]
-    }
+async def get_expense_analytics(user_id: str, period: str = "last_month"):
+    """Get expense analytics for a user"""
+    try:
+        start_date, end_date = get_date_range(period)
+        user_id_obj = ObjectId(user_id)
+        
+        query = {
+            "user_id": user_id_obj,
+            "transaction_type": "debit",
+            "transaction_date": {
+                "$gte": start_date,
+                "$lte": end_date
+            }
+        }
+        
+        transactions = list(user_financial_transactions_collection.find(query))
+        total_expense = sum(t.get("amount", 0) for t in transactions)
+        
+        # Convert ObjectId fields to strings for JSON serialization
+        transactions_serialized = convert_objectid_to_str(transactions)
+        
+        return {
+            "user_id": user_id,
+            "period": period,
+            "total_expense": total_expense,
+            "transaction_count": len(transactions),
+            "transactions": transactions_serialized
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in expense analytics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/users/{user_id}/transactions")
-async def get_user_transactions(
-    user_id: str = PathParam(..., description="User ID"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Number of transactions to return"),
-    offset: int = Query(default=0, ge=0, description="Number of transactions to skip"),
-    transaction_type: Optional[str] = Query(None, description="Filter by type: credit or debit"),
-    start_date: Optional[str] = Query(None, description="Start date filter (ISO format)"),
-    end_date: Optional[str] = Query(None, description="End date filter (ISO format)")
-):
-    """
-    Get paginated user transactions with optional filters
-    """
-    
+async def get_user_transactions(user_id: str, limit: int = 50, offset: int = 0):
+    """Get user transactions with pagination"""
     try:
-        # Build query with proper user_id handling
-        from bson import ObjectId
+        user_id_obj = ObjectId(user_id)
         
-        user_id_obj = None
-        try:
-            # Try ObjectId lookup first
-            user_id_obj = ObjectId(user_id)
-        except:
-            # Keep as string if conversion fails
-            pass
-        
-        query = {"user_id": user_id_obj if user_id_obj else user_id}
-        
-        if transaction_type:
-            if transaction_type not in ['credit', 'debit']:
-                raise HTTPException(
-                    status_code=400,
-                    detail="transaction_type must be 'credit' or 'debit'"
-                )
-            query["transaction_type"] = transaction_type
-        
-        if start_date or end_date:
-            date_filter = {}
-            if start_date:
-                date_filter["$gte"] = parse_iso_date(start_date)
-            if end_date:
-                date_filter["$lte"] = parse_iso_date(end_date)
-            query["transaction_date"] = date_filter
+        query = {"user_id": user_id_obj}
         
         # Get total count
         total_count = user_financial_transactions_collection.count_documents(query)
         
-        # Get transactions with pagination
+        # Get paginated results
         transactions = list(
             user_financial_transactions_collection
             .find(query)
@@ -637,133 +476,67 @@ async def get_user_transactions(
             .limit(limit)
         )
         
-        # Convert ObjectId to string for JSON serialization
-        for txn in transactions:
-            if '_id' in txn:
-                txn['_id'] = str(txn['_id'])
-            if 'transaction_date' in txn and hasattr(txn['transaction_date'], 'isoformat'):
-                txn['transaction_date'] = txn['transaction_date'].isoformat()
+        # Convert ObjectId fields to strings for JSON serialization
+        transactions_serialized = convert_objectid_to_str(transactions)
         
         return {
             "user_id": user_id,
-            "transactions": transactions,
+            "transactions": transactions_serialized,
             "pagination": {
                 "total_count": total_count,
                 "limit": limit,
                 "offset": offset,
-                "has_next": offset + limit < total_count,
-                "has_previous": offset > 0
-            },
-            "filters": {
-                "transaction_type": transaction_type,
-                "start_date": start_date,
-                "end_date": end_date
+                "has_more": offset + limit < total_count
             }
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Error retrieving user transactions",
-                "error": str(e)
-            }
-        )
+        logger.error(f"Error getting user transactions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/users/{user_id}/summary")
-async def get_user_summary(user_id: str = PathParam(..., description="User ID")):
-    """
-    Get comprehensive user summary including profile and financial overview
-    """
-    
+async def get_user_summary(user_id: str):
+    """Get user summary statistics"""
     try:
-        # Get user profile (handle both ObjectId and string user_id)
-        from bson import ObjectId
+        user_id_obj = ObjectId(user_id)
         
-        user = None
-        user_id_obj = None
-        try:
-            # Try ObjectId lookup first
-            user_id_obj = ObjectId(user_id)
-            user = users_collection.find_one({"_id": user_id_obj})
-        except:
-            # Fallback to string user_id lookup (backward compatibility)
-            user = users_collection.find_one({"user_id": user_id})
-            if user and user.get("_id"):
-                user_id_obj = user["_id"]
-        
-        if not user:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User not found: {user_id}"
-            )
-        
-        # Get recent financial analytics (last month)
-        analytics_request = FinancialAnalyticsRequest(
-            user_id=user_id,
-            period="last_month"
-        )
-        
-        recent_analytics = await get_financial_analytics(analytics_request)
-        
-        # Get transaction counts by type
+        # Count transactions
         total_transactions = user_financial_transactions_collection.count_documents(
-            {"user_id": user_id_obj if user_id_obj else user_id}
+            {"user_id": user_id_obj}
         )
+        
+        # Count SMS data
+        total_sms = sms_data_collection.count_documents({"user_id": user_id_obj})
+        processed_sms = sms_data_collection.count_documents({
+            "user_id": user_id_obj,
+            "is_processed": True
+        })
+        
+        # Get recent transactions
+        recent_transactions = list(
+            user_financial_transactions_collection
+            .find({"user_id": user_id_obj})
+            .sort("transaction_date", -1)
+            .limit(5)
+        )
+        
+        # Convert ObjectId fields to strings for JSON serialization
+        recent_transactions_serialized = convert_objectid_to_str(recent_transactions)
         
         return {
-            "user_profile": {
-                "user_id": user["user_id"],
-                "name": user.get("name"),
-                "email": user.get("email"),
-                "phone": user.get("phone"),
-                "created_at": user.get("created_at"),
-                "is_active": user.get("is_active", True)
+            "user_id": user_id,
+            "statistics": {
+                "total_sms": total_sms,
+                "processed_sms": processed_sms,
+                "total_transactions": total_transactions
             },
-            "sms_statistics": user.get("sms_stats", {}),
-            "financial_overview": {
-                "total_transactions": total_transactions,
-                "last_month_income": recent_analytics.total_income,
-                "last_month_expenses": recent_analytics.total_expense,
-                "last_month_net": recent_analytics.net_amount
-            },
-            "summary_generated_at": datetime.now()
+            "recent_transactions": recent_transactions_serialized
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "message": "Error generating user summary",
-                "error": str(e)
-            }
-        )
-
-# Error Handlers
-@app.exception_handler(404)
-async def not_found_handler(request, exc):
-    return JSONResponse(
-        status_code=404,
-        content={"message": "Resource not found", "timestamp": datetime.now().isoformat()}
-    )
-
-@app.exception_handler(500)
-async def internal_error_handler(request, exc):
-    return JSONResponse(
-        status_code=500,
-        content={"message": "Internal server error", "timestamp": datetime.now().isoformat()}
-    )
+        logger.error(f"Error getting user summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "api_server:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8001)
