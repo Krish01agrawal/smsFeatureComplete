@@ -1,0 +1,370 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+env:
+  PYTHON_VERSION: '3.11'
+  MONGODB_VERSION: '7.0'
+
+jobs:
+  # SMS Processing Module Tests
+  test-sms-processing:
+    runs-on: ubuntu-latest
+    name: Test SMS Processing Module
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: testuser
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-sms-processing-${{ hashFiles('extract-sms-email-data/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-sms-processing-
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      working-directory: ./extract-sms-email-data
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+    
+    - name: Run tests
+      working-directory: ./extract-sms-email-data
+      env:
+        MONGODB_URI: mongodb://testuser:testpass@localhost:27017/test_db?authSource=admin
+        MONGODB_DB: test_db
+      run: |
+        python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./extract-sms-email-data/coverage.xml
+        flags: sms-processing
+        name: sms-processing-coverage
+
+  # Analytics Module Tests
+  test-analytics:
+    runs-on: ubuntu-latest
+    name: Test Analytics Module
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: testuser
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-analytics-${{ hashFiles('sms/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-analytics-
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      working-directory: ./sms
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+    
+    - name: Run tests
+      working-directory: ./sms
+      env:
+        MONGODB_URI: mongodb://testuser:testpass@localhost:27017/test_db?authSource=admin
+        MONGODB_DB: test_db
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        python -m pytest tests/ -v --cov=. --cov-report=xml --cov-report=html
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./sms/coverage.xml
+        flags: analytics
+        name: analytics-coverage
+
+  # Integration Tests
+  test-integration:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    needs: [test-sms-processing, test-analytics]
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: testuser
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r extract-sms-email-data/requirements.txt
+        pip install -r sms/requirements.txt
+        pip install pytest pytest-asyncio
+    
+    - name: Run integration tests
+      env:
+        MONGODB_URI: mongodb://testuser:testpass@localhost:27017/test_db?authSource=admin
+        MONGODB_DB: test_db
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        python -m pytest tests/integration/ -v
+
+  # Security Scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    name: Security Scan
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety semgrep
+    
+    - name: Run Bandit security scan
+      run: |
+        bandit -r extract-sms-email-data/ -f json -o bandit-sms-processing.json || true
+        bandit -r sms/ -f json -o bandit-analytics.json || true
+    
+    - name: Run Safety check
+      run: |
+        safety check -r extract-sms-email-data/requirements.txt --json --output safety-sms-processing.json || true
+        safety check -r sms/requirements.txt --json --output safety-analytics.json || true
+    
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-scan-results
+        path: |
+          bandit-sms-processing.json
+          bandit-analytics.json
+          safety-sms-processing.json
+          safety-analytics.json
+
+  # Code Quality
+  code-quality:
+    runs-on: ubuntu-latest
+    name: Code Quality Check
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install code quality tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install black isort flake8 mypy
+    
+    - name: Run Black formatter check
+      run: |
+        black --check extract-sms-email-data/ sms/
+    
+    - name: Run isort import sorting check
+      run: |
+        isort --check-only extract-sms-email-data/ sms/
+    
+    - name: Run Flake8 linting
+      run: |
+        flake8 extract-sms-email-data/ sms/ --max-line-length=88 --extend-ignore=E203,W503
+    
+    - name: Run MyPy type checking
+      run: |
+        mypy extract-sms-email-data/ --ignore-missing-imports || true
+        mypy sms/ --ignore-missing-imports || true
+
+  # Build Docker Images
+  build-docker:
+    runs-on: ubuntu-latest
+    name: Build Docker Images
+    needs: [test-sms-processing, test-analytics, test-integration]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push SMS Processing image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./extract-sms-email-data
+        file: ./extract-sms-email-data/Dockerfile
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/sms-processing:latest
+          ${{ secrets.DOCKER_USERNAME }}/sms-processing:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Build and push Analytics image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./sms
+        file: ./sms/Dockerfile
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/sms-analytics:latest
+          ${{ secrets.DOCKER_USERNAME }}/sms-analytics:${{ github.sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    name: Deploy to Staging
+    needs: [build-docker]
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to staging
+      run: |
+        echo "Deploying to staging environment..."
+        # Add your staging deployment commands here
+        # Example: kubectl apply -f k8s/staging/
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    name: Deploy to Production
+    needs: [build-docker]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        # Add your production deployment commands here
+        # Example: kubectl apply -f k8s/production/
+
+  # Performance Tests
+  performance-tests:
+    runs-on: ubuntu-latest
+    name: Performance Tests
+    needs: [test-integration]
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: testuser
+          MONGO_INITDB_ROOT_PASSWORD: testpass
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r extract-sms-email-data/requirements.txt
+        pip install -r sms/requirements.txt
+        pip install locust
+    
+    - name: Run performance tests
+      env:
+        MONGODB_URI: mongodb://testuser:testpass@localhost:27017/test_db?authSource=admin
+        MONGODB_DB: test_db
+      run: |
+        # Run Locust performance tests
+        locust -f tests/performance/locustfile.py --headless -u 10 -r 2 -t 30s --html performance-report.html
+    
+    - name: Upload performance report
+      uses: actions/upload-artifact@v3
+      with:
+        name: performance-report
+        path: performance-report.html
