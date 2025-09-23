@@ -56,8 +56,8 @@ def convert_objectid_to_str(data):
 
 # MongoDB connection - Use environment variable or default to local
 # You can set MONGODB_URI in .env file or environment variable
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/pluto_money")
-MONGODB_DB = os.getenv("MONGODB_DB", "pluto_money")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/blackcard")
+MONGODB_DB = os.getenv("MONGODB_DB", "blackcard")
 
 print(f"🔗 Using MongoDB URI: {MONGODB_URI}")
 
@@ -115,36 +115,188 @@ class SMSProcessingRequest(BaseModel):
 
 class FinancialAnalyticsRequest(BaseModel):
     user_id: str
-    period: str = Field(..., pattern="^(last_week|last_month|last_3_months|last_5_months|last_6_months|last_year)$")
+    period: str = Field(..., pattern="^(last_week|last_2_weeks|last_month|last_3_months|last_5_months|last_6_months|last_9_months |last_12_months|last_year|last_2_years|last_3_years|last_5_years|last_10_years)$")
     
     @validator('period')
     def validate_period(cls, v):
-        valid_periods = ["last_week", "last_month", "last_3_months", "last_5_months", "last_6_months", "last_year"]
+        valid_periods = ["last_week", "last_2_weeks", "last_month", "last_3_months", "last_5_months", "last_6_months", "last_9_months", "last_12_months", "last_year", "last_2_years", "last_3_years", "last_5_years", "last_10_years"]
         if v not in valid_periods:
             raise ValueError(f"Invalid period. Use: {', '.join(valid_periods)}")
         return v
 
 # Utility Functions
 def get_date_range(period: str) -> tuple:
-    """Get start and end dates for the given period"""
+    """Get start and end dates for the given period using proper month-based calculation"""
     now = datetime.now()
     
     if period == "last_week":
         start_date = now - timedelta(days=7)
+    elif period == "last_2_weeks":
+        start_date = now - timedelta(days=14)
     elif period == "last_month":
-        start_date = now - timedelta(days=30)
+        # Last complete month
+        if now.month == 1:
+            start_date = datetime(now.year - 1, 12, 1)
+        else:
+            start_date = datetime(now.year, now.month - 1, 1)
+        end_date = datetime(now.year, now.month, 1) - timedelta(days=1)
     elif period == "last_3_months":
-        start_date = now - timedelta(days=90)
+        # Last 3 complete months
+        if now.month <= 3:
+            start_date = datetime(now.year - 1, 12 - (3 - now.month), 1)
+        else:
+            start_date = datetime(now.year, now.month - 3, 1)
+        end_date = now  # Include current month
     elif period == "last_5_months":
-        start_date = now - timedelta(days=150)
+        # Last 5 complete months
+        if now.month <= 5:
+            start_date = datetime(now.year - 1, 12 - (5 - now.month), 1)
+        else:
+            start_date = datetime(now.year, now.month - 5, 1)
+        end_date = now  # Include current month
     elif period == "last_6_months":
-        start_date = now - timedelta(days=180)
+        # Last 6 complete months (April to September for current September)
+        if now.month <= 6:
+            start_date = datetime(now.year - 1, 12 - (6 - now.month), 1)
+        else:
+            start_date = datetime(now.year, now.month - 5, 1)
+        end_date = now  # Include current month
+    elif period == "last_9_months":
+        # Last 9 complete months
+        if now.month <= 9:
+            start_date = datetime(now.year - 1, 12 - (9 - now.month), 1)
+        else:
+            start_date = datetime(now.year, now.month - 9, 1)
+        end_date = now  # Include current month
+    elif period == "last_12_months":
+        # Last 12 complete months
+        if now.month <= 12:
+            start_date = datetime(now.year - 1, 12 - (12 - now.month), 1)
+        else:
+            start_date = datetime(now.year, now.month - 12, 1)
+        end_date = now  # Include current month
     elif period == "last_year":
-        start_date = now - timedelta(days=365)
+        # Last year (current year)
+        start_date = datetime(now.year, 1, 1)
+        end_date = now  # Include current year up to today
+    elif period == "last_2_years":
+        # Last 2 years (current year + previous year)
+        start_date = datetime(now.year - 1, 1, 1)
+        end_date = now  # Include current year up to today
+    elif period == "last_3_years":
+        # Last 3 years (current year + previous 2 years)
+        start_date = datetime(now.year - 2, 1, 1)
+        end_date = now  # Include current year up to today
+    elif period == "last_5_years":
+        # Last 5 years (current year + previous 4 years)
+        start_date = datetime(now.year - 4, 1, 1)
+        end_date = now  # Include current year up to today
+    elif period == "last_10_years":
+        # Last 10 years (current year + previous 9 years)
+        start_date = datetime(now.year - 9, 1, 1)
+        end_date = now  # Include current year up to today
     else:
-        start_date = now - timedelta(days=30)
+        # Default to last month
+        if now.month == 1:
+            start_date = datetime(now.year - 1, 12, 1)
+        else:
+            start_date = datetime(now.year, now.month - 1, 1)
+        end_date = now.replace(day=1) - timedelta(days=1)
     
-    return start_date, now
+    return start_date, end_date
+
+def get_monthly_breakdown(transactions: List[Dict], start_date: datetime, end_date: datetime) -> Dict[str, Dict]:
+    """Get month-by-month breakdown of transactions"""
+    monthly_data = {}
+    
+    # Initialize all months in range (inclusive of start and end months)
+    current = start_date.replace(day=1)
+    end_month = end_date.replace(day=1)
+    
+    while current <= end_month:
+        month_key = current.strftime("%Y-%m")
+        monthly_data[month_key] = {
+            "month": current.strftime("%B %Y"),
+            "income": 0.0,
+            "expense": 0.0,
+            "savings": 0.0,
+            "expense_ratio": 0.0,
+            "transaction_count": 0
+        }
+        # Move to next month
+        if current.month == 12:
+            current = current.replace(year=current.year + 1, month=1)
+        else:
+            current = current.replace(month=current.month + 1)
+    
+    # Process transactions
+    for transaction in transactions:
+        trans_date = transaction.get("transaction_date")
+        if isinstance(trans_date, str):
+            trans_date = datetime.fromisoformat(trans_date.replace('Z', '+00:00'))
+        
+        month_key = trans_date.strftime("%Y-%m")
+        if month_key in monthly_data:
+            amount = transaction.get("amount", 0)
+            trans_type = transaction.get("transaction_type", "")
+            
+            monthly_data[month_key]["transaction_count"] += 1
+            
+            if trans_type == "credit":
+                monthly_data[month_key]["income"] += amount
+            elif trans_type == "debit":
+                monthly_data[month_key]["expense"] += amount
+            
+            # Calculate savings and ratio
+            monthly_data[month_key]["savings"] = monthly_data[month_key]["income"] - monthly_data[month_key]["expense"]
+            if monthly_data[month_key]["income"] > 0:
+                monthly_data[month_key]["expense_ratio"] = monthly_data[month_key]["expense"] / monthly_data[month_key]["income"]
+    
+    return monthly_data
+
+def get_yearly_breakdown(transactions: List[Dict], start_date: datetime, end_date: datetime) -> Dict[str, Dict]:
+    """Get year-by-year breakdown of transactions"""
+    yearly_data = {}
+    
+    # Initialize all years in range
+    current_year = start_date.year
+    end_year = end_date.year
+    
+    for year in range(current_year, end_year + 1):
+        year_key = str(year)
+        yearly_data[year_key] = {
+            "year": year_key,
+            "income": 0.0,
+            "expense": 0.0,
+            "savings": 0.0,
+            "expense_ratio": 0.0,
+            "transaction_count": 0
+        }
+    
+    # Process transactions
+    for transaction in transactions:
+        trans_date = transaction.get("transaction_date")
+        if isinstance(trans_date, str):
+            trans_date = datetime.fromisoformat(trans_date.replace('Z', '+00:00'))
+        
+        year_key = str(trans_date.year)
+        if year_key in yearly_data:
+            amount = transaction.get("amount", 0)
+            trans_type = transaction.get("transaction_type", "")
+            
+            yearly_data[year_key]["transaction_count"] += 1
+            
+            if trans_type == "credit":
+                yearly_data[year_key]["income"] += amount
+            elif trans_type == "debit":
+                yearly_data[year_key]["expense"] += amount
+            
+            # Calculate savings and ratio
+            yearly_data[year_key]["savings"] = yearly_data[year_key]["income"] - yearly_data[year_key]["expense"]
+            if yearly_data[year_key]["income"] > 0:
+                yearly_data[year_key]["expense_ratio"] = yearly_data[year_key]["expense"] / yearly_data[year_key]["income"]
+    
+    return yearly_data
 
 async def run_pipeline_async(user_id: str, sms_file_path: str, batch_size: int, model: str, 
                            create_indexes: bool, skip_date_conversion: bool) -> Dict[str, Any]:
@@ -366,10 +518,23 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
         # Calculate analytics
         total_income = sum(t.get("amount", 0) for t in transactions if t.get("transaction_type") == "credit")
         total_expense = sum(t.get("amount", 0) for t in transactions if t.get("transaction_type") == "debit")
-        net_amount = total_income - total_expense
+        total_savings = total_income - total_expense
+        expense_ratio = total_expense / total_income if total_income > 0 else 0
         
         income_transactions = [t for t in transactions if t.get("transaction_type") == "credit"]
         expense_transactions = [t for t in transactions if t.get("transaction_type") == "debit"]
+        
+        # Convert ObjectId fields to strings for JSON serialization
+        transactions_serialized = convert_objectid_to_str(transactions)
+        
+        # Determine breakdown type based on period
+        breakdown = {}
+        if any(request.period.endswith(suffix) for suffix in ["_months"]) or request.period == "last_year":
+            # Month-by-month breakdown for periods up to 1 year
+            breakdown = get_monthly_breakdown(transactions, start_date, end_date)
+        elif any(request.period.endswith(suffix) for suffix in ["_years"]):
+            # Year-by-year breakdown for multi-year periods
+            breakdown = get_yearly_breakdown(transactions, start_date, end_date)
         
         return {
             "user_id": request.user_id,
@@ -378,10 +543,13 @@ async def get_financial_analytics(request: FinancialAnalyticsRequest):
             "end_date": end_date,
             "total_income": total_income,
             "total_expense": total_expense,
-            "net_amount": net_amount,
+            "total_savings": total_savings,
+            "expense_ratio": expense_ratio,
             "transaction_count": len(transactions),
             "income_transactions": len(income_transactions),
-            "expense_transactions": len(expense_transactions)
+            "expense_transactions": len(expense_transactions),
+            "breakdown": breakdown,
+            "transactions": transactions_serialized
         }
         
     except Exception as e:
@@ -410,11 +578,19 @@ async def get_income_analytics(user_id: str, period: str = "last_month"):
         # Convert ObjectId fields to strings for JSON serialization
         transactions_serialized = convert_objectid_to_str(transactions)
         
+        # Add breakdown for periods
+        breakdown = {}
+        if any(period.endswith(suffix) for suffix in ["_months"]) or period == "last_year":
+            breakdown = get_monthly_breakdown(transactions, start_date, end_date)
+        elif any(period.endswith(suffix) for suffix in ["_years"]):
+            breakdown = get_yearly_breakdown(transactions, start_date, end_date)
+        
         return {
             "user_id": user_id,
             "period": period,
             "total_income": total_income,
             "transaction_count": len(transactions),
+            "breakdown": breakdown,
             "transactions": transactions_serialized
         }
         
@@ -444,11 +620,19 @@ async def get_expense_analytics(user_id: str, period: str = "last_month"):
         # Convert ObjectId fields to strings for JSON serialization
         transactions_serialized = convert_objectid_to_str(transactions)
         
+        # Add breakdown for periods
+        breakdown = {}
+        if any(period.endswith(suffix) for suffix in ["_months"]) or period == "last_year":
+            breakdown = get_monthly_breakdown(transactions, start_date, end_date)
+        elif any(period.endswith(suffix) for suffix in ["_years"]):
+            breakdown = get_yearly_breakdown(transactions, start_date, end_date)
+        
         return {
             "user_id": user_id,
             "period": period,
             "total_expense": total_expense,
             "transaction_count": len(transactions),
+            "breakdown": breakdown,
             "transactions": transactions_serialized
         }
         
@@ -520,6 +704,13 @@ async def get_user_summary(user_id: str):
             .limit(5)
         )
         
+        # Calculate comprehensive financial metrics
+        all_transactions = list(user_financial_transactions_collection.find({"user_id": user_id_obj}))
+        total_income = sum(t.get("amount", 0) for t in all_transactions if t.get("transaction_type") == "credit")
+        total_expense = sum(t.get("amount", 0) for t in all_transactions if t.get("transaction_type") == "debit")
+        total_savings = total_income - total_expense
+        expense_ratio = total_expense / total_income if total_income > 0 else 0
+        
         # Convert ObjectId fields to strings for JSON serialization
         recent_transactions_serialized = convert_objectid_to_str(recent_transactions)
         
@@ -528,7 +719,11 @@ async def get_user_summary(user_id: str):
             "statistics": {
                 "total_sms": total_sms,
                 "processed_sms": processed_sms,
-                "total_transactions": total_transactions
+                "total_transactions": total_transactions,
+                "total_income": total_income,
+                "total_expense": total_expense,
+                "total_savings": total_savings,
+                "expense_ratio": expense_ratio
             },
             "recent_transactions": recent_transactions_serialized
         }

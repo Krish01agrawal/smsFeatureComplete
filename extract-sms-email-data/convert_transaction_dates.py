@@ -14,7 +14,7 @@ Safely converts string transaction_date fields to BSON Date format in MongoDB.
 Usage:
     # Set up .env file with MongoDB credentials
     echo 'MONGODB_URI=mongodb+srv://<user>:<pass>@<cluster>/?retryWrites=true&w=majority' >> .env
-    echo 'MONGODB_DB=pluto_money' >> .env
+    echo 'MONGODB_DB=blackcard' >> .env
     
     # Run with defaults from .env
     python convert_transaction_dates.py
@@ -166,8 +166,8 @@ Examples:
     )
     parser.add_argument(
         "--db", 
-        default=os.environ.get("MONGODB_DB", "pluto_money"),
-        help="Database name (default: from .env file or 'pluto_money')"
+        default=os.environ.get("MONGODB_DB", "blackcard"),
+        help="Database name (default: from .env file or 'blackcard')"
     )
     parser.add_argument(
         "--source", 
@@ -210,7 +210,7 @@ Examples:
               file=sys.stderr)
         print("\nExample .env file:")
         print('MONGODB_URI=mongodb+srv://user:pass@cluster/?retryWrites=true&w=majority')
-        print('MONGODB_DB=pluto_money')
+        print('MONGODB_DB=blackcard')
         sys.exit(1)
 
     try:
@@ -383,7 +383,18 @@ Examples:
             }
         ]
 
-        print(f"⚙️  Pipeline stages: {len(pipeline)}")
+        # Create required unique index for $merge operation
+        print("🔧 Creating required unique index for $merge operation...")
+        try:
+            dst_collection.create_index(
+                [("user_id", 1), ("unique_id", 1)],
+                unique=True,
+                name="user_unique_idx"
+            )
+            print("✅ Unique index created successfully")
+        except Exception as e:
+            print(f"⚠️  Index creation warning: {e}")
+            # Continue anyway - index might already exist
         
         # Execute conversion
         print(f"\n🚀 Converting dates and merging into collection: {args.db}.{args.dest}")

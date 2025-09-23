@@ -29,8 +29,8 @@ except ImportError:
     sys.exit(1)
 
 # MongoDB Configuration
-MONGODB_URI = "mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
-DATABASE_NAME = "pluto_money"
+MONGODB_URI = "mongodb+srv://dev:fXt3BsN6IffLtXu7@blackcard-dev.7tofd5j.mongodb.net/blackcard"
+DATABASE_NAME = "blackcard"
 USERS_COLLECTION = "users"
 
 class UserManager:
@@ -101,14 +101,14 @@ class UserManager:
             
             # Index on creation date for analytics
             self.users_collection.create_index(
-                [("created_at", -1)], 
+                [("createdAt", -1)], 
                 background=True,
-                name="idx_created_at"
+                name="idx_createdAt"
             )
             
             # Compound index for active users
             self.users_collection.create_index(
-                [("is_active", 1), ("created_at", -1)], 
+                [("is_active", 1), ("createdAt", -1)], 
                 background=True,
                 name="idx_active_users"
             )
@@ -237,8 +237,8 @@ class UserManager:
             "email": email_value,  # Use processed email value
             "phone": cleaned_data["phone"],
             "is_active": True,
-            "created_at": now,
-            "updated_at": now,
+            "createdAt": now,
+            "updatedAt": now,
             "sms_stats": {
                 "total_uploaded": 0,
                 "total_processed": 0,
@@ -357,7 +357,7 @@ class UserManager:
                     "sms_stats.total_financial": financial
                 },
                 "$set": {
-                    "updated_at": now
+                    "updatedAt": now
                 }
             }
             
@@ -402,7 +402,7 @@ class UserManager:
                 "sms_stats.total_processed": total_processed,
                 "sms_stats.total_financial": total_financial,
                 "sms_stats.last_processing": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
+                "updatedAt": datetime.utcnow()
             }
             
             result = self.users_collection.update_one(
@@ -481,7 +481,7 @@ class UserManager:
             
             # Get recent activity
             recent_users = self.users_collection.count_documents({
-                "created_at": {"$gte": datetime.utcnow().replace(day=1)}  # This month
+                "createdAt": {"$gte": datetime.utcnow().replace(day=1)}  # This month
             })
             
             # Get SMS statistics
@@ -531,7 +531,7 @@ class UserManager:
             users = list(self.users_collection.find(
                 query, 
                 {"_id": 0}  # Exclude MongoDB _id field
-            ).sort("created_at", -1).skip(skip).limit(limit))
+            ).sort("createdAt", -1).skip(skip).limit(limit))
             
             return users
             

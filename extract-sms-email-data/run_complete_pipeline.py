@@ -268,7 +268,7 @@ Examples:
         if not args.skip_date_conversion:
             conversion_cmd = [
                 "python3", "convert_transaction_dates.py",
-                "--db", "pluto_money",
+                "--db", "blackcard",
                 "--source", "financial_transactions",
                 "--dest", "user_financial_transactions",
                 "--force"  # 🚀 NEW: Auto-proceed without confirmation for automation
@@ -303,7 +303,7 @@ Examples:
         if pipeline_state['steps_failed']:
             print(f"⚠️  Steps with issues: {', '.join(pipeline_state['steps_failed'])}")
         print(f"📊 Input file: {args.input}")
-        print(f"💾 Final data location: pluto_money.user_financial_transactions")
+        print(f"💾 Final data location: blackcard.user_financial_transactions")
         print("=" * 60)
         
         return 0

@@ -445,7 +445,7 @@ def main():
     if not mongodb_uri:
         print(f"❌ Missing required environment variable: MONGODB_URI")
         print("Please set:")
-        print(f"   export MONGODB_URI='mongodb+srv://divyamverma:geMnO2HtgXwOrLsW@cluster0.gzbouvi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0'")
+        print(f"   export MONGODB_URI='mongodb+srv://dev:fXt3BsN6IffLtXu7@blackcard-dev.7tofd5j.mongodb.net/blackcard'")
         return 1
     
     # API_URL is optional - if missing, system will use rule-based fallback
