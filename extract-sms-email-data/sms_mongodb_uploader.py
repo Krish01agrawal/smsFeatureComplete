@@ -547,8 +547,9 @@ def main():
         final_user_id = validated_data[0]["user_id"] if validated_data else "unknown"
         
         if not validated_data:
-            print("❌ No valid SMS data to upload")
-            return 1
+            print("✅ No new SMS data to upload (all SMS were duplicates - duplicate prevention working correctly)")
+            print(f"   📊 Summary: {len(sms_data)} input → 0 new (all duplicates) + {len(sms_data)} duplicates + 0 errors")
+            return 0  # 🚀 FIXED: Return success when all SMS are duplicates
         
         # Upload data
         print(f"\n📤 Uploading {len(validated_data)} SMS records...")

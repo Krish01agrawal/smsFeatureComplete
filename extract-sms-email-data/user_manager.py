@@ -75,13 +75,8 @@ class UserManager:
     def _create_user_indexes(self):
         """Create indexes for users collection"""
         try:
-            # Unique index on user_id (primary identifier)
-            self.users_collection.create_index(
-                [("user_id", 1)], 
-                unique=True, 
-                background=True,
-                name="unique_user_id"
-            )
+            # 🚀 REMOVED: No longer need unique index on user_id since we use _id as primary identifier
+            # The _id field is automatically unique in MongoDB
             
             # Index on email for lookups
             self.users_collection.create_index(
@@ -220,19 +215,19 @@ class UserManager:
         
         cleaned_data = validation["cleaned_data"]
         
-        # Create user document with temporary ObjectId for user_id field
+        # Create user document using only MongoDB's _id as primary identifier
         now = datetime.utcnow()
-        from bson import ObjectId
-        temp_user_id = ObjectId()  # Generate temporary ObjectId
         
         # Handle email field to avoid unique index conflicts
         email_value = cleaned_data["email"]
         if email_value is None:
             # For null emails, use a unique identifier to avoid unique index conflicts
-            email_value = f"temp_email_{temp_user_id}"
+            from bson import ObjectId
+            temp_id = ObjectId()
+            email_value = f"temp_email_{temp_id}"
         
         user_doc = {
-            "user_id": temp_user_id,  # Include user_id field to satisfy unique index
+            # 🚀 REMOVED: No user_id field - we use _id as primary identifier
             "name": cleaned_data["name"],
             "email": email_value,  # Use processed email value
             "phone": cleaned_data["phone"],
@@ -254,14 +249,7 @@ class UserManager:
             result = self.users_collection.insert_one(user_doc)
             actual_user_id = result.inserted_id  # This is the MongoDB ObjectId
             
-            # Update user_id to match the actual _id
-            self.users_collection.update_one(
-                {"_id": actual_user_id},
-                {"$set": {"user_id": actual_user_id}}
-            )
-            
-            # Update user_doc for return
-            user_doc["user_id"] = actual_user_id
+            # 🚀 REMOVED: No need to update user_id since we don't use it
             user_doc["_id"] = actual_user_id
             
             return {
